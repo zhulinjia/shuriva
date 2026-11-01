@@ -1,3 +1,4 @@
+import { declareRequestAudit } from "../history/public.js";
 import type { Router } from "express";
 import { DataSourceError } from "./errors.js";
 import type { DataSourceRouteContext } from "./route-context.js";
@@ -40,6 +41,11 @@ export function mountDataSourceScanRoutes(
     res.json({ snapshot });
   });
   router.post("/workspaces/:workspaceId/:sourceId/scan", async (req, res) => {
+    declareRequestAudit(res, "source.scanned", {
+      workspaceId: req.params.workspaceId,
+      sourceId: req.params.sourceId,
+      targetId: req.params.sourceId,
+    });
     const actor = res.locals.ownerId as string;
     const source = await store.boundSource(actor, req.params.workspaceId, req.params.sourceId);
     if (!source || !(await registry.isActiveOwner(actor, source.connectorId)))

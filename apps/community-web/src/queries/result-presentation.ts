@@ -3,9 +3,14 @@ import type { QueryCell, QueryResult } from "./query-result.ts";
 export type VisualizationDefinition = { kind: "table" | "bar" | "line"; x?: string; y?: string };
 
 export function isNumericColumn(type: string): boolean {
-  return /^(?:TINYINT|SMALLINT|MEDIUMINT|INT|INTEGER|BIGINT|LONGLONG|DECIMAL|NEWDECIMAL|NUMERIC|FLOAT|DOUBLE|REAL)(?:\b|$)/i.test(
-    type,
+  return /^(?:UNSIGNED\s+)?(?:TINYINT|SMALLINT|MEDIUMINT|INT|INTEGER|BIGINT|LONGLONG|DECIMAL|NEWDECIMAL|NUMERIC|FLOAT|DOUBLE|REAL)(?:\b|$)/i.test(
+    type.trim(),
   );
+}
+
+/** A size boundary can stop before the first matching row is returned. */
+export function isCompleteEmptyResult(result: Pick<QueryResult, "rows" | "truncated">): boolean {
+  return result.rows.length === 0 && !result.truncated;
 }
 
 type Decimal = { negative: boolean; digits: string; exponent: number };

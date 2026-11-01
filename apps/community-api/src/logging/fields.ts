@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { OperationalError, operationalMessages } from "../operational-error.js";
 
 export type DiagnosticLevel = "debug" | "info" | "warn" | "error";
 export interface DiagnosticFields {
@@ -159,6 +160,8 @@ const errorCodes = new Set([
   "ER_LOCK_WAIT_TIMEOUT",
   "ER_LOCK_DEADLOCK",
   "ER_DUP_ENTRY",
+  "MYSQL_CLEAR_PASSWORD_NOT_ENABLED",
+  "PROTOCOL_SEQUENCE_TIMEOUT",
   "ER_NO_SUCH_TABLE",
   "INVALID",
   "DENIED",
@@ -185,6 +188,14 @@ export function diagnosticLocations(): string[] {
 }
 function classifyError(error: unknown): Record<string, unknown> {
   if (!error || typeof error !== "object") return { errorKind: "unknown" };
+  if (error instanceof OperationalError && Object.hasOwn(operationalMessages, error.code)) {
+    return {
+      errorKind: "OperationalError",
+      errorCode: error.code,
+      operatorMessage: operationalMessages[error.code],
+      locations: diagnosticLocations(),
+    };
+  }
   const name = Reflect.get(error, "name"),
     code = Reflect.get(error, "code");
   const errorKind = [

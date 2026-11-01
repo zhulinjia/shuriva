@@ -8,6 +8,7 @@ type Identity = { id: string; revision: number; pending: Conversation | null };
 export function useConversationHistory(
   workspace: string,
   source: string,
+  messages: ChatMessage[],
   enabled: boolean,
   onSaved: () => void,
 ) {
@@ -19,6 +20,15 @@ export function useConversationHistory(
     setStatus((prior) => (prior === "saved" ? "unsaved" : prior));
   }
   const identity = useRef<Identity>({ id: crypto.randomUUID(), revision: 0, pending: null });
+  const persisted = useRef<Conversation | null>(null);
+  const currentContent: Conversation = {
+    title: title.trim() || messages[0]?.text.slice(0, 120) || "新会话",
+    messages: messages.map(({ id, role, text }) => ({ id, role, text })),
+  };
+  const hasUnsaved =
+    status === "saving" ||
+    status === "uncertain" ||
+    (messages.length > 0 && !sameConversation(persisted.current, currentContent));
   const scope = useRef(""),
     active = useRef(true),
     flight = useRef(false);
@@ -31,28 +41,35 @@ export function useConversationHistory(
     };
   }, []);
   useEffect(() => {
-    if (status !== "saving" && status !== "unsaved" && status !== "uncertain") return;
+    if (!hasUnsaved) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [status]);
+  }, [hasUnsaved]);
   const reset = useCallback(() => {
     identity.current = { id: crypto.randomUUID(), revision: 0, pending: null };
+    persisted.current = null;
     updateTitle("");
     setStatus("empty");
     setNotice("");
   }, []);
   const open = useCallback((record: HistoryRecord<Conversation>) => {
     identity.current = { id: record.id, revision: record.revision, pending: null };
+    persisted.current = record.content;
     updateTitle(record.content.title);
     setStatus("saved");
     setNotice("已读取本机会话；重新发送前仍需确认当前数据范围。");
   }, []);
   async function save(messages: ChatMessage[], asNew = false) {
-    if (!enabled || !source || !messages.length || flight.current) return;
+    if (!source || !messages.length || flight.current) return;
+    if (!enabled) {
+      setStatus("unsaved");
+      setNotice("当前对话仅保存在本页，离开或刷新前请确认保留方式。");
+      return;
+    }
     if (status === "uncertain" && !asNew) {
       setNotice("上次保存结果未确认，请先核对保存状态，避免覆盖。");
       return;
@@ -73,6 +90,7 @@ export function useConversationHistory(
       if (!active.current || scope.current !== requestBase || identity.current !== target) return;
       target.revision = result.revision;
       target.pending = null;
+      persisted.current = content;
       updateTitle(content.title);
       setStatus("saved");
       setNotice("会话已保存在本机。");
@@ -106,6 +124,7 @@ export function useConversationHistory(
       }
       target.revision = record.revision;
       target.pending = null;
+      persisted.current = record.content;
       setStatus("saved");
       setNotice("已核对：上次会话保存成功。");
       onSaved();
@@ -123,13 +142,13 @@ export function useConversationHistory(
   return {
     title,
     setTitle,
-    status,
+    status: status === "saved" && hasUnsaved ? ("unsaved" as const) : status,
     notice,
     save,
     check,
     reset,
     open,
     blocked: status === "saving" || status === "uncertain",
-    hasUnsaved: status === "saving" || status === "uncertain" || status === "unsaved",
+    hasUnsaved,
   };
 }

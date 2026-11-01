@@ -2,8 +2,15 @@ packages:
   - 'apps/*'
   - 'packages/*'
 
+# Patched upload parser until the Nest adapter advances its pinned dependency.
+overrides:
+  '@nestjs/platform-express>multer': '2.5.0'
+
 allowBuilds:
   '@prisma/engines': true
   esbuild: true
   prisma: true
 
+patchedDependencies:
+  '@better-auth/kysely-adapter@1.7.14': patches/@better-auth__kysely-adapter@1.7.14.patch
+  mysql2@3.24.4: patches/mysql2@3.24.4.patch

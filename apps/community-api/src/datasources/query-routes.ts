@@ -1,3 +1,4 @@
+import { declareRequestAudit } from "../history/public.js";
 import type { Router } from "express";
 import { diagnostics } from "../logging/public.js";
 import { DataSourceError } from "./errors.js";
@@ -31,6 +32,11 @@ export function mountDataSourceQueryRoutes(
     res.json(token);
   });
   router.post("/workspaces/:workspaceId/:sourceId/queries", async (req, res) => {
+    declareRequestAudit(res, "query.failed", {
+      workspaceId: req.params.workspaceId,
+      sourceId: req.params.sourceId,
+      failureOnly: true,
+    });
     if (!read) {
       res.sendStatus(404);
       return;
@@ -62,7 +68,7 @@ export function mountDataSourceQueryRoutes(
             if (!read.validScope(scope, data.instanceId, data.scopeToken, data.submittedAt))
               throw new Error("STALE");
             const id = read.jobs.create(
-              scope,
+              { ...scope, sessionId: res.locals.sessionId as string },
               data.requestId,
               data.sql,
               data.parameters,
@@ -117,7 +123,10 @@ export function mountDataSourceQueryRoutes(
           (scope) => {
             if (!read.validScope(scope, data.instanceId, data.scopeToken, data.submittedAt))
               throw new Error("STALE");
-            return read.jobs.createModelSchema(scope, data.requestId);
+            return read.jobs.createModelSchema(
+              { ...scope, sessionId: res.locals.sessionId as string },
+              data.requestId,
+            );
           },
         ),
       );

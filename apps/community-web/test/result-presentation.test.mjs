@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cellDisplay, compareResultCells, resultChartData } from "../src/queries/result-presentation.ts";
+import { cellDisplay, compareResultCells, resultChartData, isNumericColumn, isCompleteEmptyResult } from "../src/queries/result-presentation.ts";
 
 const text = (value) => ({ null: false, encoding: "text", value });
 const binary = (value) => ({ null: false, encoding: "base64", value });
@@ -15,6 +15,27 @@ const fixture = (rows) => ({
   truncated: false,
 });
 const definition = { kind: "bar", x: "city", y: "balance" };
+
+test("driver unsigned numeric names retain exact ordering and chart eligibility", () => {
+  for (const type of ["UNSIGNED BIGINT", "UNSIGNED INT", "UNSIGNED SMALLINT", "UNSIGNED TINYINT"]) {
+    assert.equal(isNumericColumn(type), true);
+    assert.ok(compareResultCells(text("10"), text("2"), type) > 0);
+    assert.ok(compareResultCells(text("18446744073709551615"), text("18446744073709551614"), type) > 0);
+    const result = fixture([[text("A"), text("10")]]);
+    result.columns[1].type = type;
+    assert.equal(resultChartData(result, definition).ok, true);
+  }
+  assert.equal(isNumericColumn("UNSIGNED VARCHAR"), false);
+});
+
+test("a first oversized row is incomplete rather than evidence of no matches", () => {
+  const result = fixture([]);
+  assert.equal(isCompleteEmptyResult(result), true);
+  for (const reason of ["cell", "bytes", "rows"]) {
+    assert.equal(isCompleteEmptyResult({ ...result, truncated: true, reason }), false);
+  }
+  assert.equal(isCompleteEmptyResult(fixture([[text("A"), text("1")]])), false);
+});
 
 test("table ordering preserves large integer and decimal precision, signs and scientific values", () => {
   const values = [

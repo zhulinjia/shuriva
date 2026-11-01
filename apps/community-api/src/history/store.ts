@@ -254,7 +254,9 @@ export class HistoryStore {
         previous.data.outcome !== entry.outcome ||
         previous.data.connectorId !== entry.connectorId ||
         previous.data.executionId !== entry.executionId ||
-        previous.data.targetId !== entry.targetId
+        previous.data.targetId !== entry.targetId ||
+        previous.data.attemptedWorkspaceId !== entry.attemptedWorkspaceId ||
+        previous.data.attemptedSourceId !== entry.attemptedSourceId
       )
         throw new DataSourceError("CONFLICT");
     }

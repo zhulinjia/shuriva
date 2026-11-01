@@ -1,3 +1,4 @@
+import { testSessions, testSessionId } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -7,6 +8,7 @@ import { ReadService } from "../src/queries/service.js";
 import type { QueryJournal, ExecutionSummary, ExecutionState } from "../src/queries/journal.js";
 
 const scope = {
+  sessionId: testSessionId,
   ownerId: randomUUID(),
   workspaceId: randomUUID(),
   sourceId: randomUUID(),
@@ -26,7 +28,10 @@ test("journal creation failures and persisted terminal IDs cannot dispatch a new
     },
     async () => ({ created: false, state: "completed" }),
   ]) {
-    const service = new ReadService(source, registry, { begin, update: async () => {} });
+    const service = new ReadService(source, registry, testSessions, {
+      begin,
+      update: async () => {},
+    });
     try {
       const id = service.jobs.create(scope, randomUUID(), "SELECT id FROM items", [], 1);
       await assert.rejects(() => service.trackExecution(scope, id));
@@ -52,7 +57,7 @@ test("execution summary retries a failed write without SQL, parameters, or resul
       writes.push({ state, summary });
     },
   };
-  const service = new ReadService(source, registry, journal);
+  const service = new ReadService(source, registry, testSessions, journal);
   try {
     const id = service.jobs.create(
       scope,
@@ -99,7 +104,7 @@ test("execution summary retries a failed write without SQL, parameters, or resul
 
 test("uncertain connector outcomes remain unknown and cancelled executions do not become success", async () => {
   const states: ExecutionState[] = [];
-  const service = new ReadService(source, registry, {
+  const service = new ReadService(source, registry, testSessions, {
     begin: async () => ({ created: true, state: "queued" }),
     update: async (_s, _id, state) => {
       states.push(state);

@@ -1,3 +1,4 @@
+import { testSessions, testSessionId } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import {
   createHash,
@@ -632,6 +633,7 @@ test("a signed result retry is acknowledged once without replacing the original 
     const input = pairInput(offer.pairingId, offer.secret, identity);
     await registry.pair(input);
     const scope = {
+      sessionId: testSessionId,
       ownerId: "owner",
       connectorId: input.connectorId,
       workspaceId: randomUUID(),
@@ -640,7 +642,7 @@ test("a signed result retry is acknowledged once without replacing the original 
     const store = {
       boundSource: async () => ({ connectorId: scope.connectorId }),
     } as unknown as DataSourceStore;
-    service = new ReadService(store, registry);
+    service = new ReadService(store, registry, testSessions);
     const reader = service;
     const id = reader.jobs.create(scope, randomUUID(), "SELECT id FROM items", [], 1);
     const dispatched = reader.jobs.claim(scope.connectorId);

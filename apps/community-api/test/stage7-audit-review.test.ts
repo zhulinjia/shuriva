@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
+import { request as httpRequest } from "node:http";
 import express from "express";
 import type { ConnectorRegistry } from "../src/connectors/registry.js";
 import { mountConnectorRoutes } from "../src/connectors/routes.js";
 import { AuditTrail } from "../src/history/audit.js";
 import type { AuditEntry } from "../src/history/model.js";
 import type { HistoryStore } from "../src/history/store.js";
+import { declareRequestAudit } from "../src/history/public.js";
 
 test("audit queue retries DB failures with fixed scoped events and classifies model check and GET denial accurately", async () => {
   const entries: Array<{ owner: string; scope: unknown; entry: AuditEntry }> = [];
@@ -21,10 +23,17 @@ test("audit queue retries DB failures with fixed scoped events and classifies mo
   trail.install(app, async () => "owner");
   const workspace = randomUUID(),
     source = randomUUID();
-  app.post("/api/model/check", (_req, res) => res.json({ available: true }));
-  app.get("/api/data-sources/workspaces/:workspace/:source/private-business-path", (_req, res) =>
-    res.status(403).end(),
-  );
+  app.post("/api/model/check", (_req, res) => {
+    declareRequestAudit(res, "model.checked");
+    res.json({ available: true });
+  });
+  app.get("/api/data-sources/workspaces/:workspace/:source/private-business-path", (req, res) => {
+    declareRequestAudit(res, "security.denied", {
+      workspaceId: req.params.workspace,
+      sourceId: req.params.source,
+    });
+    res.status(403).end();
+  });
   const server = app.listen(0, "127.0.0.1");
   try {
     if (!server.listening) await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -48,10 +57,15 @@ test("audit queue retries DB failures with fixed scoped events and classifies mo
       entries.map((item) => item.entry),
       [
         { event: "model.checked", outcome: "success" },
-        { event: "security.denied", outcome: "denied" },
+        {
+          event: "security.denied",
+          outcome: "denied",
+          attemptedWorkspaceId: workspace,
+          attemptedSourceId: source,
+        },
       ],
     );
-    assert.deepEqual(entries[1]?.scope, { workspaceId: workspace, sourceId: source });
+    assert.equal(entries[1]?.scope, null);
     assert.doesNotMatch(
       JSON.stringify(entries),
       /private-business-path|secret|business|headers|path/,
@@ -128,13 +142,37 @@ test("committed pair, rotation and diagnostic operations retain protocol acknowl
       },
     ];
     for (const request of requests) {
-      const response = await fetch(`${base}/${request.path}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(request.body),
+      // A connector uses HTTP, not the browser Fetch API's forbidden-port
+      // list; an ephemeral listener may legitimately receive one of those ports.
+      const response = await new Promise<{ status?: number; body: unknown }>((resolve, reject) => {
+        const outgoing = httpRequest(
+          `${base}/${request.path}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+          },
+          (incoming) => {
+            const chunks: Buffer[] = [];
+            incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+            incoming.on("error", reject);
+            incoming.on("end", () => {
+              try {
+                resolve({
+                  status: incoming.statusCode,
+                  body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown,
+                });
+              } catch (error) {
+                reject(error);
+              }
+            });
+          },
+        );
+        outgoing.setTimeout(5000, () => outgoing.destroy(new Error("synthetic peer timeout")));
+        outgoing.on("error", reject);
+        outgoing.end(JSON.stringify(request.body));
       });
       assert.equal(response.status, 200);
-      assert.equal(((await response.json()) as { signature: string }).signature, request.ack);
+      assert.equal((response.body as { signature: string }).signature, request.ack);
     }
     assert.deepEqual(operations, ["pair", "rotate", "result"]);
   } finally {

@@ -1,15 +1,18 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { decodeModelSchema } from "../ai/public.js";
-import type { ExecutionState, ExecutionSummary } from "./journal.js";
 import type { ReadCancel, ReadTask } from "../protocol/read-task.js";
+import type { ExecutionState, ExecutionSummary } from "./journal.js";
 
 type Scope = { ownerId: string; connectorId: string; workspaceId: string; sourceId: string };
+type SubmittedScope = Scope & { sessionId: string };
 type Parameter = { kind: "string" | "integer" | "decimal" | "boolean" | "null"; value: string };
 type State = "queued" | "running" | "completed" | "failed" | "cancelled" | "expired";
 type Job = Scope & {
+  sessionId: string | null;
   id: string;
   fingerprint: string | null;
   state: State;
+  dispatched: boolean;
   payload: string;
   outcomePayload?: string;
   issuedAt: number;
@@ -38,6 +41,41 @@ const failureCodes = new Set<string>([
   "outcome_unknown",
   "schema_changed",
 ]);
+
+/** Shared validation for the signed delegated query and schema tasks. */
+function validatedDelegation(delegatedScope: unknown): Record<string, string[]> {
+  if (!Array.isArray(delegatedScope) || delegatedScope.length < 1 || delegatedScope.length > 256)
+    throw new Error("INVALID");
+  const validated: Record<string, string[]> = Object.create(null);
+  let scopeBytes = 2;
+  let tableCount = 0;
+  for (const entry of delegatedScope as unknown[]) {
+    if (!Array.isArray(entry) || entry.length !== 2) throw new Error("INVALID");
+    const [table, columns]: unknown[] = entry;
+    if (
+      typeof table !== "string" ||
+      !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(table) ||
+      Object.hasOwn(validated, table) ||
+      !Array.isArray(columns) ||
+      columns.length < 1 ||
+      columns.length > 256
+    )
+      throw new Error("INVALID");
+    scopeBytes += table.length + 5 + (tableCount++ > 0 ? 1 : 0);
+    if (scopeBytes > 24576) throw new Error("INVALID");
+    const accepted: string[] = [];
+    for (const column of columns as unknown[]) {
+      if (typeof column !== "string" || !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(column))
+        throw new Error("INVALID");
+      scopeBytes += column.length + 2 + (accepted.length > 0 ? 1 : 0);
+      if (scopeBytes > 24576) throw new Error("INVALID");
+      accepted.push(column);
+    }
+    if (new Set(accepted).size !== accepted.length) throw new Error("INVALID");
+    validated[table] = accepted;
+  }
+  return validated;
+}
 
 function validResult(value: unknown, maxRows: number): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -134,6 +172,17 @@ export class ReadJobs {
     return job?.operation === "read_query" ? job.nonce : null;
   }
 
+  sessionIdentity(
+    scope: Scope,
+    id: string,
+  ): { ownerId: string; sessionId: string; taskNonce: string } | null {
+    this.prune();
+    const job = this.find(scope, id);
+    return job?.sessionId
+      ? { ownerId: job.ownerId, sessionId: job.sessionId, taskNonce: job.nonce }
+      : null;
+  }
+
   /** Result disposal and later authorization changes must not rewrite execution history. */
   private finishExecution(job: Job, state: ExecutionState, summary: ExecutionSummary = {}): void {
     if (job.operation === "read_query" && !job.executionOutcome)
@@ -141,12 +190,45 @@ export class ReadJobs {
   }
 
   create(
-    scope: Scope,
+    scope: SubmittedScope,
     requestId: unknown,
     sql: unknown,
     parameters: unknown,
     maxRows: unknown,
     schemaVersion?: unknown,
+  ): string {
+    return this.createRead(scope, requestId, sql, parameters, maxRows, schemaVersion, null);
+  }
+
+  /** Only application use cases with a verified delegation may call this path. */
+  createDelegated(
+    scope: SubmittedScope,
+    requestId: unknown,
+    sql: unknown,
+    parameters: unknown,
+    maxRows: unknown,
+    schemaVersion: unknown,
+    delegatedScope: unknown,
+  ): string {
+    return this.createRead(
+      scope,
+      requestId,
+      sql,
+      parameters,
+      maxRows,
+      schemaVersion,
+      validatedDelegation(delegatedScope),
+    );
+  }
+
+  private createRead(
+    scope: SubmittedScope,
+    requestId: unknown,
+    sql: unknown,
+    parameters: unknown,
+    maxRows: unknown,
+    schemaVersion: unknown,
+    delegatedScope: Record<string, string[]> | null,
   ): string {
     this.prune();
     if (
@@ -187,25 +269,45 @@ export class ReadJobs {
       params.push({ kind: item.kind as Parameter["kind"], value: item.value });
     }
     const payload = Buffer.from(
-      JSON.stringify({ sql, parameters: params, maxRows, schemaVersion: schemaVersion ?? null }),
+      JSON.stringify({
+        sql,
+        parameters: params,
+        maxRows,
+        schemaVersion: schemaVersion ?? null,
+        delegatedScope,
+      }),
     ).toString("base64url");
     if (payload.length > 32768) throw new Error("INVALID");
     return this.enqueue(scope, requestId, payload, Number(maxRows), "read_query");
   }
 
   /** A fresh signed Connector task discloses only its local model-authorized schema. */
-  createModelSchema(scope: Scope, requestId: unknown): string {
+  createModelSchema(scope: SubmittedScope, requestId: unknown): string {
     return this.createModelTask(scope, requestId, "model_schema");
   }
 
-  createModelAuthorization(scope: Scope, requestId: unknown): string {
+  /** Schema disclosure for a verified delegation must use this narrower path. */
+  createDelegatedModelSchema(
+    scope: SubmittedScope,
+    requestId: unknown,
+    delegatedScope: unknown,
+  ): string {
+    const payload = Buffer.from(
+      JSON.stringify({ delegatedScope: validatedDelegation(delegatedScope) }),
+    ).toString("base64url");
+    if (payload.length > 32768) throw new Error("INVALID");
+    return this.createModelTask(scope, requestId, "model_schema", payload);
+  }
+
+  createModelAuthorization(scope: SubmittedScope, requestId: unknown): string {
     return this.createModelTask(scope, requestId, "model_authorize");
   }
 
   private createModelTask(
-    scope: Scope,
+    scope: SubmittedScope,
     requestId: unknown,
     operation: "model_schema" | "model_authorize",
+    payload = Buffer.from("{}").toString("base64url"),
   ): string {
     this.prune();
     if (
@@ -217,18 +319,20 @@ export class ReadJobs {
       !uuid.test(requestId)
     )
       throw new Error("INVALID");
-    return this.enqueue(scope, requestId, Buffer.from("{}").toString("base64url"), 0, operation);
+    return this.enqueue(scope, requestId, payload, 0, operation);
   }
 
   private enqueue(
-    scope: Scope,
+    scope: SubmittedScope,
     requestId: string,
     payload: string,
     maxRows: number,
     operation: ReadTask["operation"],
   ): string {
+    if (!uuid.test(scope.sessionId)) throw new Error("INVALID");
     const fingerprint = createHmac("sha256", this.fingerprintKey)
       .update(operation)
+      .update(scope.sessionId)
       .update("\0")
       .update(payload)
       .digest("hex");
@@ -259,6 +363,7 @@ export class ReadJobs {
       id,
       fingerprint,
       state: "queued",
+      dispatched: false,
       payload,
       issuedAt,
       expiresAt: issuedAt + (operation === "model_authorize" ? 30 : 60),
@@ -374,14 +479,22 @@ export class ReadJobs {
     }
   }
 
-  reject(scope: Scope, id: string): void {
+  reject(scope: Scope, id: string, taskNonce: string): void {
     const job = this.find(scope, id);
-    if (job?.state === "running") {
+    if (job?.state === "running" && job.nonce === taskNonce && !job.dispatched) {
       job.state = "failed";
       job.outcomePayload = "denied";
       job.payload = "";
       this.finishExecution(job, "failed", { code: "denied" });
     }
+  }
+
+  /** Publication can have reached the Connector even if the HTTP reply is lost. */
+  markDispatched(scope: Scope, id: string, taskNonce: string): boolean {
+    const job = this.find(scope, id);
+    if (job?.state !== "running" || job.nonce !== taskNonce) return false;
+    job.dispatched = true;
+    return true;
   }
 
   clearCancellation(scope: Scope, id: string): void {
@@ -413,9 +526,11 @@ export class ReadJobs {
       // cancellation tombstone so a late POST with this ID cannot execute.
       job = {
         ...scope,
+        sessionId: null,
         id,
         fingerprint: null,
         state: "cancelled",
+        dispatched: false,
         payload: "",
         issuedAt,
         expiresAt: issuedAt + 60,
@@ -583,7 +698,7 @@ export class ReadJobs {
       if (job.expiresAt <= now && (job.state === "queued" || job.state === "running")) {
         job.state = "expired";
         job.payload = "";
-        this.finishExecution(job, "expired");
+        this.finishExecution(job, job.dispatched ? "outcome_unknown" : "expired");
       }
       if (job.expiresAt <= now) job.cancellationPending = false;
       if (job.retainedUntil <= now) this.jobs.delete(id);

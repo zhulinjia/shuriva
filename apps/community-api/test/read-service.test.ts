@@ -1,3 +1,4 @@
+import { testSessions, testSessionId } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -10,6 +11,7 @@ import type { ReadResult } from "../src/protocol/read-task.js";
 import { ReadService } from "../src/queries/service.js";
 
 const scope = {
+  sessionId: testSessionId,
   ownerId: "owner",
   connectorId: "11111111-1111-4111-8111-111111111111",
   workspaceId: "22222222-2222-4222-8222-222222222222",
@@ -36,7 +38,7 @@ test("read dispatch rechecks binding and does not deliver a task cancelled durin
       return { ...task, signature: "fixture" };
     },
   } as unknown as ConnectorRegistry;
-  const service = new ReadService(store, registry);
+  const service = new ReadService(store, registry, testSessions);
   const first = service.jobs.create(scope, randomUUID(), "SELECT id FROM items", [], 1);
   assert.equal(await service.next(scope.connectorId), null);
   assert.deepEqual(service.jobs.status(scope, first), { state: "failed", payload: "denied" });
@@ -58,7 +60,7 @@ test("result is discarded when the source is unbound before publication", async 
     verifyReadResult: async (_input: unknown, commit: () => Promise<void>) => commit(),
     readResultAcknowledgement: () => "ack",
   } as unknown as ConnectorRegistry;
-  const service = new ReadService(store, registry);
+  const service = new ReadService(store, registry, testSessions);
   const id = service.jobs.create(scope, randomUUID(), "SELECT id FROM items", [], 1);
   const dispatched = service.jobs.claim(scope.connectorId);
   assert.ok(dispatched?.type === "read");
@@ -92,7 +94,7 @@ test("transient binding lookup failure retains the same task for the next heartb
   const registry = {
     issueReadTask: async (task: object) => ({ ...task, signature: "fixture" }),
   } as unknown as ConnectorRegistry;
-  const service = new ReadService(store, registry);
+  const service = new ReadService(store, registry, testSessions);
   const id = randomUUID();
   try {
     service.jobs.create(scope, id, "SELECT id FROM items", [], 1);
@@ -131,7 +133,7 @@ test("a concurrent unbind cancels a query created after its authorization check 
   const registry = {
     withActiveOwner: async (_owner: string, _id: string, action: () => unknown) => action(),
   } as unknown as ConnectorRegistry;
-  const service = new ReadService(store, registry);
+  const service = new ReadService(store, registry, testSessions);
   const app = express();
   let removalArrived!: () => void;
   const removalSeen = new Promise<void>((resolve) => {
@@ -231,7 +233,7 @@ test("cancel-before-create and same-ID retry are safe through HTTP routes", asyn
   const registry = {
     withActiveOwner: async (_owner: string, _id: string, action: () => unknown) => action(),
   } as unknown as ConnectorRegistry;
-  const service = new ReadService(store, registry);
+  const service = new ReadService(store, registry, testSessions);
   const app = express();
   const origin = "http://localhost:5173";
   mountDataSourceRoutes(

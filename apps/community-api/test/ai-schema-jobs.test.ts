@@ -1,3 +1,4 @@
+import { testSessions, testSessionId } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
@@ -7,6 +8,7 @@ import { ReadJobs } from "../src/queries/jobs.js";
 import { ReadService } from "../src/queries/service.js";
 
 const scope = {
+  sessionId: testSessionId,
   ownerId: "owner",
   connectorId: "11111111-1111-4111-8111-111111111111",
   workspaceId: "22222222-2222-4222-8222-222222222222",
@@ -87,7 +89,7 @@ test("authorization results bind the lease to the signed task and strip internal
 });
 
 test("binding, workspace and Connector invalidation abort in-flight model requests", () => {
-  const service = new ReadService({} as DataSourceStore, {} as ConnectorRegistry);
+  const service = new ReadService({} as DataSourceStore, {} as ConnectorRegistry, testSessions);
   try {
     service.issueScope(scope);
     const first = service.watchBinding(scope);
@@ -111,7 +113,7 @@ test("binding, workspace and Connector invalidation abort in-flight model reques
 });
 
 test("semantic edits invalidate only matching model contexts while reads and results survive", () => {
-  const service = new ReadService({} as DataSourceStore, {} as ConnectorRegistry);
+  const service = new ReadService({} as DataSourceStore, {} as ConnectorRegistry, testSessions);
   try {
     const grant = service.issueScope(scope);
     const other = { ...scope, sourceId: randomUUID() };

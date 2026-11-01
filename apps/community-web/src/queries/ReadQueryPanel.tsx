@@ -399,7 +399,6 @@ export function ReadQueryPanel({
             onDefinitionChange={setVisualization}
             disabled={pending || cancelling || interactionBlocked || definitionBusy || exportBusy}
           />
-          {result.rows.length === 0 && <p>查询完成，没有符合条件的数据。</p>}
         </div>
       )}
       <ConfirmDialog

@@ -7,6 +7,12 @@ coverage/
 .env
 .env.*
 !.env.example
+.envrc
+.npmrc
+.netrc
+.pypirc
+.ssh/
+.aws/
 *.log
 packages/storage-prisma/src/generated/
 .runtime/
@@ -19,6 +25,12 @@ packages/storage-prisma/src/generated/
 *.jks
 *.keystore
 *.kdbx
+credentials.json
+service-account*.json
+# Public synthetic TLS fixtures; never deployment credentials (see adjacent README).
+!apps/community-api/test/fixtures/tls/ip.pem
+!apps/community-api/test/fixtures/tls/localhost.pem
+!apps/community-api/test/fixtures/tls/synthetic-key.pem
 
 # Local database copies, backups and process state; keep SQL migrations tracked.
 *.db
@@ -29,6 +41,10 @@ packages/storage-prisma/src/generated/
 *.sqlite3-*
 *.bolt
 *.bbolt
+*.dump
+*.sql.gz
+*.sql.zip
+*.sql.zst
 *.pid
 *.sock
 /backups/

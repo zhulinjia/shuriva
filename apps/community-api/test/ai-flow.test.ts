@@ -1,3 +1,4 @@
+import { testSessions, testSessionId } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
@@ -24,6 +25,7 @@ test("model plan uses attested scope and explicit reviewed destination, and reje
     tables: schema.tables.map((table) => ({ ...table, version, structureHash: "b".repeat(64) })),
   };
   const scope = {
+    sessionId: testSessionId,
     ownerId: "owner",
     connectorId: randomUUID(),
     workspaceId: randomUUID(),
@@ -88,7 +90,7 @@ test("model plan uses attested scope and explicit reviewed destination, and reje
   const registry = {
     withActiveOwner: async (_owner: string, _id: string, action: () => unknown) => action(),
   } as unknown as ConnectorRegistry;
-  const service = new ReadService(store, registry);
+  const service = new ReadService(store, registry, testSessions);
   const id = randomUUID();
   service.jobs.createModelSchema(scope, id);
   assert.equal(service.jobs.claim(scope.connectorId)?.type, "read");

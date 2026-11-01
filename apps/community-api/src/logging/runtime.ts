@@ -1,3 +1,4 @@
+import { OperationalError } from "../operational-error.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, open, lstat, readFile, unlink, readdir, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -43,17 +44,17 @@ export async function createDiagnosticRuntime(
   if (config.directory) {
     await mkdir(config.directory, { recursive: true, mode: 0o700 });
     if ((await lstat(config.directory)).isSymbolicLink())
-      throw Error("Log directory cannot be a symlink");
+      throw new OperationalError("LOG_DIRECTORY_LINK");
     if (
       (await realpath(config.directory)).toLowerCase() !== resolve(config.directory).toLowerCase()
     )
-      throw Error("Log directory ancestors cannot be symlinks");
+      throw new OperationalError("LOG_DIRECTORY_LINK");
     for (const name of await readdir(config.directory))
       if (
         /^community-api\.jsonl(?:\.[0-9]+)?$/.test(name) &&
         (await lstat(join(config.directory, name))).isSymbolicLink()
       )
-        throw Error("Log files cannot be symlinks");
+        throw new OperationalError("LOG_FILE_LINK");
     const lockPath = join(config.directory, "community-api.lock"),
       token = randomUUID();
     const lock = await open(lockPath, "wx", 0o600);

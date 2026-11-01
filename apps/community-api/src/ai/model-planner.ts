@@ -10,6 +10,7 @@ import {
   type SemanticReader,
 } from "../semantic/public.js";
 import type { PlanStage } from "./progress.js";
+import type { SessionIdentity } from "../auth/public.js";
 
 export type ModelScope = {
   ownerId: string;
@@ -103,8 +104,10 @@ export class ModelPlanner {
     return semanticDisclosure(schema, model.document);
   }
 
-  async preview(ownerId: string, workspaceId: string, sourceId: string, taskId: string) {
+  async preview(actor: SessionIdentity, workspaceId: string, sourceId: string, taskId: string) {
+    const { ownerId, sessionId } = actor;
     return this.access(ownerId, workspaceId, sourceId, async (scope) => {
+      await this.read.assertSession(scope, taskId, sessionId);
       const authorized = this.read.jobs.modelSchema(scope, taskId);
       const destination = this.models.versioned(ownerId);
       if (!authorized || !destination) return null;
@@ -123,7 +126,7 @@ export class ModelPlanner {
   }
 
   async generate(
-    ownerId: string,
+    actor: SessionIdentity,
     workspaceId: string,
     sourceId: string,
     taskId: string,
@@ -132,7 +135,7 @@ export class ModelPlanner {
     progress: (stage: PlanStage) => void = () => {},
   ) {
     return this.generateAuthorized(
-      ownerId,
+      actor,
       workspaceId,
       sourceId,
       taskId,
@@ -156,7 +159,7 @@ export class ModelPlanner {
    * Their validator must be synchronous and never perform an external action.
    */
   async generateAuthorized<T>(
-    ownerId: string,
+    actor: SessionIdentity,
     workspaceId: string,
     sourceId: string,
     taskId: string,
@@ -166,16 +169,19 @@ export class ModelPlanner {
     validate: (answer: unknown, context: AuthorizedModelContext) => T,
     progress: (stage: PlanStage) => void = () => {},
   ): Promise<T> {
+    const { ownerId, sessionId } = actor;
     const confirmationId = randomUUID();
     let prepared: {
       scope: ModelScope;
       config: NonNullable<ReturnType<ModelStore["versioned"]>>["config"];
       binding: ReturnType<ModelRead["watchBinding"]>;
       model: ReturnType<ModelStore["watch"]>;
+      session: Awaited<ReturnType<ModelRead["watchSession"]>>;
     } | null = null;
     try {
       progress("checking_context");
       prepared = await this.access(ownerId, workspaceId, sourceId, async (scope) => {
+        const identity = await this.read.assertSession(scope, taskId, sessionId);
         if (
           requestSignal.aborted ||
           !this.read.validScope(scope, input.instanceId, input.scopeToken, input.submittedAt)
@@ -202,19 +208,26 @@ export class ModelPlanner {
           binding.dispose();
           throw error;
         }
+        let session: Awaited<ReturnType<ModelRead["watchSession"]>> | undefined;
         try {
-          this.read.jobs.createModelAuthorization(scope, confirmationId);
+          session = await this.read.watchSession(scope, taskId, sessionId);
+          this.read.jobs.createModelAuthorization(
+            { ...scope, sessionId: identity.sessionId },
+            confirmationId,
+          );
         } catch (error) {
+          session?.dispose();
           binding.dispose();
           model.dispose();
           throw error;
         }
-        return { scope, config: stored.config, binding, model };
+        return { scope, config: stored.config, binding, model, session };
       });
       const signal = AbortSignal.any([
         requestSignal,
         prepared.binding.signal,
         prepared.model.signal,
+        prepared.session.signal,
       ]);
       const deadline = this.now() + 25_000;
       progress("waiting_connector");
@@ -238,6 +251,7 @@ export class ModelPlanner {
       progress("confirming_access");
       // Recheck while serialized with platform unbind/revoke and before model contact.
       const permitted = await this.access(ownerId, workspaceId, sourceId, async (scope) => {
+        await this.read.assertSession(scope, taskId, sessionId);
         const current = this.read.jobs.modelSchema(scope, taskId);
         const context = await this.context(scope, confirmation.schema, confirmation.structures);
         const currentContext = current
@@ -272,8 +286,12 @@ export class ModelPlanner {
       };
       try {
         progress("contacting_model");
+        const sendingScope = prepared.scope;
         answer = await invoke(prepared.config, input.question, permitted.schema, combined, {
-          beforeRequest: checkSendingDeadline,
+          beforeRequest: async () => {
+            await this.read.assertSession(sendingScope, taskId, sessionId);
+            checkSendingDeadline();
+          },
           semantics: permitted.semantics,
           onRequestSent: () => {
             checkSendingDeadline();
@@ -296,6 +314,7 @@ export class ModelPlanner {
         versions: confirmation.versions,
       });
       const stillValid = await this.access(ownerId, workspaceId, sourceId, async (scope) => {
+        await this.read.assertSession(scope, taskId, sessionId);
         const currentContext = await this.context(
           scope,
           confirmation.schema,
@@ -321,6 +340,7 @@ export class ModelPlanner {
         }
         prepared.binding.dispose();
         prepared.model.dispose();
+        prepared.session.dispose();
       }
     }
   }

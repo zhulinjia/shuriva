@@ -1,3 +1,4 @@
+import { testSessions, testSessionId } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -7,6 +8,7 @@ import type { QueryJournal } from "../src/queries/journal.js";
 import { ReadService } from "../src/queries/service.js";
 
 const scope = {
+  sessionId: testSessionId,
   ownerId: "owner",
   connectorId: "11111111-1111-4111-8111-111111111111",
   workspaceId: "22222222-2222-4222-8222-222222222222",
@@ -45,7 +47,7 @@ test("review: result cleanup must not replace completed execution with expired w
       updates.push({ id, state });
     },
   };
-  const service = new ReadService(source, registry, journal);
+  const service = new ReadService(source, registry, testSessions, journal);
   try {
     const a = service.jobs.create(scope, randomUUID(), "SELECT id FROM items", [], 1);
     await service.trackExecution(scope, a);
@@ -80,7 +82,7 @@ test("review: a request retained in the durable journal must not dispatch again 
       throw new Error("database temporarily unavailable");
     },
   };
-  const service = new ReadService(source, registry, journal);
+  const service = new ReadService(source, registry, testSessions, journal);
   try {
     const id = randomUUID();
     service.jobs.create(scope, id, "SELECT id FROM items", [], 1);
@@ -100,7 +102,7 @@ test("review: a request retained in the durable journal must not dispatch again 
 });
 
 test("review: result revocation preserves execution outcome and exposes only immutable safe summaries", () => {
-  const service = new ReadService(source, registry);
+  const service = new ReadService(source, registry, testSessions);
   try {
     const completed = service.jobs.create(scope, randomUUID(), "SELECT private FROM items", [], 1);
     service.jobs.claim(scope.connectorId);

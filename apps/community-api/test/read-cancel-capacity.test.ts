@@ -1,3 +1,4 @@
+import { testSessions, testSessionId } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -13,6 +14,7 @@ test("full cancellation tombstones invalidate the scope before a late creation",
   let now = base - 350_000;
   Date.now = () => now;
   const scope = {
+    sessionId: testSessionId,
     ownerId: "owner",
     workspaceId: randomUUID(),
     sourceId: randomUUID(),
@@ -24,7 +26,7 @@ test("full cancellation tombstones invalidate the scope before a late creation",
   const registry = {
     withActiveOwner: async (_owner: string, _connector: string, action: () => unknown) => action(),
   } as unknown as ConnectorRegistry;
-  const read = new ReadService(store, registry);
+  const read = new ReadService(store, registry, testSessions);
   const app = express();
   const origin = "http://127.0.0.1:5173";
   mountDataSourceRoutes(

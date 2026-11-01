@@ -14,6 +14,7 @@ import {
   createDatabase,
   authMutationIdentity,
   authSessionReferenceActive,
+  authSessionAccess,
 } from "./auth.js";
 import { ConnectorRegistry } from "./connectors/registry.js";
 import { authOwner, mountConnectorRoutes } from "./connectors/routes.js";
@@ -186,6 +187,7 @@ export async function createApp(
             readService = new ReadService(
               store,
               registry,
+              authSessionAccess(auth, pool),
               history
                 ? {
                     begin: (scope, id, instance) =>

@@ -1,3 +1,4 @@
+import { testSessions } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import {
   createHash,
@@ -85,7 +86,7 @@ async function identityFixture() {
     pair.signature = signed(canonicalPair(pair), active);
     await registry.pair(pair);
     const currentRegistry = registry;
-    const reads = new ReadService(f.sources, registry);
+    const reads = new ReadService(f.sources, registry, testSessions);
     let accessBarrier:
       | { entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> }
       | undefined;

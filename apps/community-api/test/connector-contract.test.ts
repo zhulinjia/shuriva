@@ -73,6 +73,36 @@ test("shared Go/TypeScript v2 pairing proof and signature match", async () => {
   );
 });
 
+test("shared delegated schema vector preserves the exact signed field scope", async () => {
+  const fixture = JSON.parse(
+    await readFile(
+      new URL("../../../../connector/testdata/delegated-schema-task.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { publicKey: string; task: ReadTask };
+  assert.equal(fixture.task.operation, "model_schema");
+  assert.deepEqual(JSON.parse(Buffer.from(fixture.task.payload, "base64url").toString("utf8")), {
+    delegatedScope: { customers: ["id"] },
+  });
+  const key = createPublicKey({
+    key: Buffer.concat([
+      Buffer.from("302a300506032b6570032100", "hex"),
+      Buffer.from(fixture.publicKey, "base64url"),
+    ]),
+    format: "der",
+    type: "spki",
+  });
+  assert.equal(
+    verify(
+      null,
+      Buffer.from(readTaskFields(fixture.task).join("\n")),
+      key,
+      Buffer.from(fixture.task.signature, "base64url"),
+    ),
+    true,
+  );
+});
+
 test("shared Go/TypeScript read task signature binds routing and payload", async () => {
   const fixture = JSON.parse(
     await readFile(
@@ -80,6 +110,8 @@ test("shared Go/TypeScript read task signature binds routing and payload", async
       "utf8",
     ),
   ) as { publicKey: string; task: ReadTask; cancel: ReadCancel; result: ReadResult };
+  const payload = JSON.parse(Buffer.from(fixture.task.payload, "base64url").toString("utf8"));
+  assert.deepEqual(payload.delegatedScope, { customers: ["id"] });
   const key = createPublicKey({
     key: Buffer.concat([
       Buffer.from("302a300506032b6570032100", "hex"),
@@ -101,6 +133,18 @@ test("shared Go/TypeScript read task signature binds routing and payload", async
     verify(
       null,
       Buffer.from(readTaskFields({ ...fixture.task, payload: "e30" }).join("\n")),
+      key,
+      Buffer.from(fixture.task.signature, "base64url"),
+    ),
+    false,
+  );
+  const widened = Buffer.from(
+    JSON.stringify({ ...payload, delegatedScope: { customers: ["id", "secret"] } }),
+  ).toString("base64url");
+  assert.equal(
+    verify(
+      null,
+      Buffer.from(readTaskFields({ ...fixture.task, payload: widened }).join("\n")),
       key,
       Buffer.from(fixture.task.signature, "base64url"),
     ),

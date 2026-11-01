@@ -20,7 +20,7 @@ Community API 当前只监听本机；Connector 仅允许回环 HTTP 或使用�
 - 结构扫描任务：`connector-v2`, `schema-scan`, `id`, `connectorId`, `actorId`, `workspaceId`, `sourceId`, `issuedAt`, `expiresAt`, `nonce`, `2`，由平台签名；Connector 独立核对本机数据源所属连接器及允许的工作区。
 - 结构扫描结果：`connector-v2`, `scan-result`, `connectorId`, `taskId`, `workspaceId`, `sourceId`, `outcome`, `sha256(payload)`（小写十六进制）, `agentVersion`, `2`, `timestamp`, `nonce`，由 Connector 签名。成功的 payload 是结构 JSON 的无填充 base64url；失败时仅允许固定错误码，不携带密码或原始异常。
 - 只读查询任务：`connector-read-v1`, `read-query`, `id`, `connectorId`, `actorId`, `workspaceId`, `sourceId`, `sha256(payload)`（小写十六进制）, `issuedAt`, `expiresAt`, `nonce`, `1`；payload 为查询与参数 JSON 的无填充 base64url，由平台签名。Connector 独立验证本机连接、工作空间、表和字段权限，再重建允许的参数化 SQL。
-- 模型结构任务：签名字段与只读查询相同，但第二项为 `model-schema`，操作类型为 `model_schema`，payload 严格为 `{}` 的无填充 base64url。Connector 现场扫描并与本机当前工作区的表、字段只读授权求交；返回基础表名、获授权字段名、简化后的字段类型和各表的结构版本摘要。平台只向模型发送库名、表名、字段名及类型，不发送摘要、数据库行、视图、结构注释或枚举值。任务和返回仍由原任务 nonce、身份、来源和有效期绑定。
+- 模型结构任务：签名字段与只读查询相同，但第二项为 `model-schema`，操作类型为 `model_schema`。管理员常规请求的 payload 为 `{}`；委托结构请求的 payload 为仅含 `delegatedScope` 的对象，列出授权的表和字段，二者均使用无填充 base64url。Connector 在验签后将委托范围与本机当前工作区表、字段授权取交集，再现场采集；返回基础表名、获授权字段名、简化后的字段类型和各表的结构版本摘要。平台只向模型发送库名、表名、字段名及类型，不发送摘要、数据库行、视图、结构注释或枚举值。任务和返回仍由原任务 nonce、身份、来源和有效期绑定。
 - 模型授权确认：用户确认发送后，平台另发 `model_authorize` 任务，签名第二项为 `model-authorize`，payload 为 `{}`。首次派发时有效期 30 秒，Connector 验签并核对发放时间与本机时钟相差不超过 2 秒，将数据源短租约持久写入系统凭据库至任务截止后 3 秒，再采集与预览同样的授权结构及版本。成功结果还包含 `leaseExpiresAt`，须等于签名任务截止时间。平台核对预览和新结果，至少剩余 5 秒才发起模型请求；请求体须在截止前 2 秒交给本地网络栈，否则中止。已发送后的模型响应可继续等待，超时或失败按模型调用错误处理。
 
 模型结构和授权结果的每张表必须包含 `version` 与 `structureHash`（64 位小写十六进制）。后者用于平台核对语义快照与实时物理结构；按列序号排列，依次对 `semantic-structure-v1`、数据库名、表名、`BASE TABLE` 以及每列的名称、完整类型、可空标记（`1`/`0`）、序号十进制做 SHA-256，每项为 8 字节大端无符号 UTF-8 字节长度和内容。Connector 在持有元数据锁的同一只读事务中读取列并计算两类摘要；缺少或不一致即拒绝。完整类型、摘要、枚举值不发送给模型。未发布项目仅维护此当前格式，平台和 Connector 应一同构建。
@@ -28,6 +28,8 @@ Community API 当前只监听本机；Connector 仅允许回环 HTTP 或使用�
 短租约期间，项目提供的数据源修改、撤权、删除及身份转移操作会提示稍后重试，Connector 异常退出后仍生效，到期自动解除。普通预览不申请租约。此约束依赖两端正常同步的系统时钟及项目支持的本机操作，无法阻止本机管理员直接修改凭据、数据库或系统时钟，也无法撤回已发出的数据。
 
 只读查询 payload 必须包含 `schemaVersion`：人工 SQL 为 `null`，模型生成查询为 64 位小写十六进制摘要。Connector 在同一只读事务持有表元数据锁时重新检查完整表定义，摘要不一致则返回 `schema_changed`，不执行 SQL；模型结构采集和执行均先检查已验证的服务器版本、SQL mode、表名大小写配置及访问权限。摘要绑定本机数据源标识、工作区、连接目标、服务器的 `@@server_uuid` 及配置代次；每次官方配置更新或转移都生成新代次，不将密码用于摘要。数据库克隆若保留相同 server_uuid，仍无法依此区分实例；此变量在隔离的 26.7.0 上验证，MySQL 8.0 尚待独立验证。摘要包含 `SHOW CREATE TABLE` 和建表时间，无法保证识别同一秒内按相同 DDL 原样重建；自增计数改变可能造成保守拒绝。结构变化后需要重新生成计划。
+
+只读查询 payload 还必须包含 `delegatedScope`，由现有 payload 摘要和平台签名共同保护。普通管理员查询为 `null`；经审批的外部委托查询为明确的表名到字段名数组映射，空或无效委托拒绝。Connector 验签并加载当前本机策略后，对委托范围与对应工作区本机表、字段权限取交集，再用于 SQL 解析和锁定元数据下的最终校验；不得修改本机保存的策略。此项只提供签名任务的范围收紧，不能代替平台的 MCP 身份认证、真实管理员审批、撤销或结果披露校验；当前 MCP 入口尚未开放。
 - 查询取消：`connector-read-v1`, `cancel-read`, `taskId`, `connectorId`, `actorId`, `workspaceId`, `sourceId`, `issuedAt`, `expiresAt`, `nonce`, `1`，由平台签名，仅作用于匹配的查询或模型结构任务。
 - 查询结果：`connector-read-v1`, `read-result`, `taskId`, `connectorId`, `actorId`, `workspaceId`, `sourceId`, `taskNonce`, `outcome`, `sha256(payload)`（小写十六进制）, `timestamp`, `nonce`, `1`，由 Connector 签名。`taskNonce` 为原任务 nonce，空闲连接器对取消任务的确认使用该取消任务 nonce；平台按当前任务状态核对，防止重启后复用任务 ID 时接受旧结果。成功 payload 是受限查询结果或授权结构 JSON 的无填充 base64url；失败仅包含固定错误码。确认依次为 `connector-read-v1`, `read-result-ack`, `connectorId`, `taskId`, `nonce`, `1`。
 
@@ -49,7 +51,7 @@ Connector 使用本机身份中的独立随机密钥对完整任务 ID 计算 HM
 
 ## G3 受控变更的独立签名通道
 
-本节对应 [G3 实现记录](../21-第八阶段G3实现与审核记录.md)。普通 Connector `run` 尚未挂接该通道，正常平台不开放写入；只有隔离测试显式装配执行器。此前只读通道继续拒绝写入，不能把写计划放入只读查询 payload。
+本节对应 [G3 实现记录](../docs/21-第八阶段G3实现与审核记录.md)。普通 Connector `run` 尚未挂接该通道，正常平台不开放写入；只有隔离测试显式装配执行器。此前只读通道继续拒绝写入，不能把写计划放入只读查询 payload。
 
 `POST /api/connector-agent/mutations/{poll,result,claim,permit}` 使用独立严格信封，不接受浏览器 Cookie 作为 Connector 身份。字段为 `id,connectorId,ownerId,workspaceId,sourceId,kind,operation,payload,issuedAt,expiresAt,nonce,replyTo,protocol,signature`；未知字段拒绝。`id` 与范围标识为当前领域编号；仅 `poll/poll_reply` 的 owner/workspace/source/operation 为空。operation 为 `capability/preview/execute/status/cancel/recover`，protocol 固定为 1。
 

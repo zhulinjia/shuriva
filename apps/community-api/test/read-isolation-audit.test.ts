@@ -1,3 +1,4 @@
+import { testSessions, testSessionId } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -11,6 +12,7 @@ import { ReadService } from "../src/queries/service.js";
 
 test("an old result cannot clear cancellation of a new same-ID task after unbinding", async () => {
   const scope = {
+    sessionId: testSessionId,
     ownerId: "owner",
     connectorId: randomUUID(),
     workspaceId: randomUUID(),
@@ -22,7 +24,7 @@ test("an old result cannot clear cancellation of a new same-ID task after unbind
     verifyReadResult: async (_input: unknown, commit: () => Promise<void>) => commit(),
     readResultAcknowledgement: () => "ack",
   } as unknown as ConnectorRegistry;
-  const service = new ReadService(store, registry);
+  const service = new ReadService(store, registry, testSessions);
   try {
     const id = randomUUID();
     service.jobs.create(scope, id, "SELECT id FROM items", [], 1);
@@ -57,6 +59,7 @@ test("an old result cannot clear cancellation of a new same-ID task after unbind
 
 test("a process restart rejects stale instance tokens and stale results with a reused ID", async () => {
   const scope = {
+    sessionId: testSessionId,
     ownerId: "owner",
     connectorId: randomUUID(),
     workspaceId: randomUUID(),
@@ -70,8 +73,8 @@ test("a process restart rejects stale instance tokens and stale results with a r
     verifyReadResult: async (_input: unknown, commit: () => Promise<void>) => commit(),
     readResultAcknowledgement: () => "ack",
   } as unknown as ConnectorRegistry;
-  const old = new ReadService(store, registry);
-  const current = new ReadService(store, registry);
+  const old = new ReadService(store, registry, testSessions);
+  const current = new ReadService(store, registry, testSessions);
   try {
     const oldScope = old.issueScope(scope);
     assert.equal(old.validScope(scope, oldScope.instanceId, oldScope.scopeToken, Date.now()), true);
@@ -114,12 +117,13 @@ test("a process restart rejects stale instance tokens and stale results with a r
 
 test("unbind and rebind invalidate a previously acquired scope token", () => {
   const scope = {
+    sessionId: testSessionId,
     ownerId: "owner",
     connectorId: randomUUID(),
     workspaceId: randomUUID(),
     sourceId: randomUUID(),
   };
-  const service = new ReadService({} as DataSourceStore, {} as ConnectorRegistry);
+  const service = new ReadService({} as DataSourceStore, {} as ConnectorRegistry, testSessions);
   try {
     const old = service.issueScope(scope);
     service.invalidateBinding(scope.ownerId, scope.workspaceId, scope.sourceId);
@@ -144,6 +148,7 @@ test("unbind and rebind invalidate a previously acquired scope token", () => {
 
 test("unread results remain available under capacity pressure until explicitly released", () => {
   const scope = {
+    sessionId: testSessionId,
     ownerId: "owner",
     connectorId: randomUUID(),
     workspaceId: randomUUID(),
@@ -187,6 +192,7 @@ test("unread results remain available under capacity pressure until explicitly r
 
 test("HTTP late POST cannot cross an unbind/rebind boundary", async () => {
   const scope = {
+    sessionId: testSessionId,
     ownerId: "owner",
     connectorId: randomUUID(),
     workspaceId: randomUUID(),
@@ -205,7 +211,7 @@ test("HTTP late POST cannot cross an unbind/rebind boundary", async () => {
   const registry = {
     withActiveOwner: async (_owner: string, _id: string, action: () => unknown) => action(),
   } as unknown as ConnectorRegistry;
-  const service = new ReadService(store, registry);
+  const service = new ReadService(store, registry, testSessions);
   const app = express();
   const origin = "http://localhost:5173";
   mountDataSourceRoutes(

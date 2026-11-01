@@ -1,3 +1,4 @@
+import { testSessions } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -171,7 +172,7 @@ test("export rechecks current Connector revocation and binding before authorizin
     withActiveOwner: async (_owner: string, _id: string, operation: () => Promise<unknown>) =>
       active ? operation() : undefined,
   } as unknown as ConnectorRegistry;
-  const read = new ReadService(sources, registry);
+  const read = new ReadService(sources, registry, testSessions);
   const store = {
     recordExport: async () => {
       exports++;

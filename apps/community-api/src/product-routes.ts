@@ -1,3 +1,4 @@
+import { declareRequestAudit, declareRequestAuditContext } from "./history/public.js";
 import { fromNodeHeaders, toNodeHandler } from "better-auth/node";
 import { diagnostics } from "./logging/public.js";
 import express, {
@@ -24,7 +25,22 @@ export function mountProductRoutes(
     operation: () => Promise<boolean>,
   ) => Promise<boolean>,
 ): void {
-  const authHandler = toNodeHandler(auth);
+  const authHandler = (req: Request, res: Response) => {
+    let delivered: globalThis.Response | undefined;
+    const finish = () => {
+      if (!delivered) return;
+      auth.completeResponse(delivered);
+      res.removeListener("finish", finish);
+      res.removeListener("close", finish);
+    };
+    res.once("finish", finish);
+    res.once("close", finish);
+    return toNodeHandler(async (request) => {
+      delivered = await auth.handler(request);
+      if (res.destroyed) finish();
+      return delivered;
+    })(req, res);
+  };
   server.use(
     "/api/auth",
     (req, res, next) => {
@@ -42,6 +58,10 @@ export function mountProductRoutes(
   );
   const store = workspaceStore ?? new WorkspaceStore(pool);
   const router = express.Router();
+  router.use("/workspaces/:id", (req, res, next) => {
+    declareRequestAuditContext(res, { targetId: req.params.id });
+    next();
+  });
   router.use((req, res, next) => {
     if (!req.path.startsWith("/workspaces") && !req.path.startsWith("/security")) {
       next("router");
@@ -106,6 +126,7 @@ export function mountProductRoutes(
     res.json({ id: req.params.id, name });
   });
   router.post("/workspaces/:id/archive", async (req, res) => {
+    declareRequestAudit(res, "workspace.archived", { targetId: req.params.id });
     const current = await currentSession(req, res);
     if (!current) return;
     if (!workspaceId.test(req.params.id)) {
@@ -123,6 +144,7 @@ export function mountProductRoutes(
     res.json({ ok: true });
   });
   router.post("/workspaces/:id/restore", async (req, res) => {
+    declareRequestAudit(res, "workspace.restored", { targetId: req.params.id });
     const current = await currentSession(req, res);
     if (!current) return;
     if (!(await store.setArchived(current.user.id, req.params.id, false))) {

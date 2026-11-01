@@ -1,3 +1,4 @@
+import { testSessions } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -68,7 +69,7 @@ test("isolated platform dispatches signed Go reads and retains safe terminal exe
     source = randomUUID();
   const store = new DataSourceStore(pool);
   const history = new HistoryStore(pool, store);
-  const service = new ReadService(store, registry, {
+  const service = new ReadService(store, registry, testSessions, {
     begin: (scope, id, instance) => history.beginExecution(scope, id, scope.connectorId, instance),
     update: (scope, id, state, summary) => history.setExecutionState(scope, id, state, summary),
   });

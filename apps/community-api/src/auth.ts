@@ -1,10 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { betterAuth } from "better-auth";
+import { createAuthMiddleware, getSession } from "better-auth/api";
 import { username } from "better-auth/plugins";
 import { fromNodeHeaders } from "better-auth/node";
 import type { IncomingHttpHeaders } from "node:http";
-import { createPool, type Pool, type PoolConnection, type RowDataPacket } from "mysql2/promise";
+import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
 import { diagnostics } from "./logging/public.js";
+import { databaseConnectionOptions } from "./auth/database.js";
+import { OperationalError } from "./operational-error.js";
+import { credentialTransactions, transactionalEndpoint } from "./auth/credential-transaction.js";
+import { AuthRequestError, prepareAuthRequest } from "./auth/http-request.js";
+export { createDatabase } from "./auth/database.js";
+export { authSessionAccess } from "./auth/session-access.js";
 
 export interface AuthConfig {
   databaseUrl: string;
@@ -16,40 +23,64 @@ export function readAuthConfig(env: NodeJS.ProcessEnv): AuthConfig {
   const databaseUrl = env.DATABASE_URL?.trim();
   const secret = env.BETTER_AUTH_SECRET;
   const origin = env.APP_ORIGIN?.trim();
-  if (!databaseUrl || !secret || !origin)
-    throw new Error("DATABASE_URL, BETTER_AUTH_SECRET and APP_ORIGIN are required");
-  if (secret.length < 32) throw new Error("BETTER_AUTH_SECRET must contain at least 32 characters");
-  const database = new URL(databaseUrl);
-  if (database.protocol !== "mysql:" || !database.hostname || !database.pathname.slice(1))
-    throw new Error("DATABASE_URL must be a MySQL database URL");
-  const parsed = new URL(origin);
+  if (!databaseUrl || !secret || !origin) throw new OperationalError("AUTH_CONFIG_REQUIRED");
+  if (secret.length < 32) throw new OperationalError("AUTH_SECRET_TOO_SHORT");
+  databaseConnectionOptions(databaseUrl);
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    throw new OperationalError("APP_ORIGIN_INVALID");
+  }
   if (parsed.origin !== origin || !["http:", "https:"].includes(parsed.protocol))
-    throw new Error("APP_ORIGIN must be an HTTP(S) origin without a trailing slash");
+    throw new OperationalError("APP_ORIGIN_INVALID");
   if (parsed.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname))
-    throw new Error("APP_ORIGIN must use HTTPS except on localhost");
+    throw new OperationalError("APP_ORIGIN_INSECURE");
   return { databaseUrl, secret, origin };
 }
 
-export function createDatabase(url: string): Pool {
-  const parsed = new URL(url);
-  return createPool({
-    host: parsed.hostname,
-    port: parsed.port ? Number(parsed.port) : 3306,
-    user: decodeURIComponent(parsed.username),
-    password: decodeURIComponent(parsed.password),
-    database: decodeURIComponent(parsed.pathname.slice(1)),
-    timezone: "Z",
-    connectionLimit: 10,
-  });
-}
-
 export function createAuth(config: AuthConfig, database: Pool) {
-  return betterAuth({
-    database,
+  const credentials = credentialTransactions(database);
+  const auth = betterAuth({
+    database: credentials.adapter,
     secret: config.secret,
     baseURL: config.origin,
     basePath: "/api/auth",
     trustedOrigins: [config.origin],
+    // better-call otherwise writes raw adapter exceptions (including SQL) to
+    // console.error after the SDK logger. The outer handler owns safe reporting.
+    onAPIError: { throw: true },
+    hooks: {
+      before: createAuthMiddleware(async (context) => {
+        if (context.path === "/change-password")
+          return { context: { ...context, body: { ...context.body, revokeOtherSessions: true } } };
+        if (context.path === "/sign-out") {
+          // The public raw endpoint propagates failures; getSessionFromCtx
+          // intentionally swallows them and cannot establish this invariant.
+          const value = await getSession()({
+            ...context,
+            headers: context.headers ?? new Headers(),
+            method: "GET",
+            asResponse: false,
+            returnHeaders: false,
+            returnStatus: false,
+            query: { disableCookieCache: true, disableRefresh: true },
+          });
+          credentials.captureSignOutSession(value?.session.id);
+        }
+      }),
+      after: createAuthMiddleware(async (context) => {
+        const result: unknown = context.context.returned;
+        if (
+          context.path === "/sign-out" &&
+          result &&
+          typeof result === "object" &&
+          "success" in result &&
+          result.success === true
+        )
+          await credentials.assertSignOutRevoked();
+      }),
+    },
     // SDK messages and arguments may contain request or adapter details. Keep
     // them inside the same reviewed boundary as application diagnostics.
     logger: {
@@ -81,6 +112,72 @@ export function createAuth(config: AuthConfig, database: Pool) {
       customRules: { "/sign-in/username": { window: 60, max: 5 } },
     },
   });
+  let activeCredentials = 0;
+  const responseCleanup = new WeakMap<Response, () => void>();
+  let readingBodies = 0;
+  const prepare = async (request: Request) => {
+    if (request.method !== "POST") return request;
+    if (readingBodies >= 32) throw new OperationalError("AUTH_REQUEST_CAPACITY");
+    readingBodies++;
+    try {
+      return await prepareAuthRequest(request, config.origin);
+    } finally {
+      readingBodies--;
+    }
+  };
+  const run = async <T>(operation: () => Promise<T>) => {
+    // No queue of credential transactions may exhaust the shared DB pool.
+    if (activeCredentials >= 3) throw new OperationalError("AUTH_CREDENTIAL_CAPACITY");
+    activeCredentials++;
+    try {
+      await auth.$context;
+      return await credentials.run(operation);
+    } finally {
+      activeCredentials--;
+    }
+  };
+  return {
+    ...auth,
+    api: {
+      ...auth.api,
+      signInUsername: transactionalEndpoint(auth.api.signInUsername, run),
+      signInEmail: transactionalEndpoint(auth.api.signInEmail, run),
+      changePassword: transactionalEndpoint(auth.api.changePassword, run),
+      signOut: transactionalEndpoint(auth.api.signOut, run),
+    },
+    handler: async (request: Request) => {
+      try {
+        const ready = await prepare(request);
+        // The product router owns the endpoint allowlist. Every state-changing
+        // SDK HTTP request shares the same atomic credential boundary.
+        return await (request.method === "POST"
+          ? run(() => auth.handler(ready))
+          : auth.handler(ready));
+      } catch (error) {
+        if (error instanceof AuthRequestError) {
+          const response = Response.json(
+            { error: "INVALID_AUTH_REQUEST" },
+            { status: error.status, headers: { "Cache-Control": "no-store", Connection: "close" } },
+          );
+          responseCleanup.set(response, () => error.finish());
+          return response;
+        }
+        diagnostics.error("auth.failure", {}, error);
+        return Response.json(
+          { error: "AUTH_UNAVAILABLE" },
+          {
+            status: 500,
+            headers: { "Cache-Control": "no-store" },
+          },
+        );
+      }
+    },
+    completeResponse(response: Response) {
+      const cleanup = responseCleanup.get(response);
+      responseCleanup.delete(response);
+      cleanup?.();
+    },
+  };
 }
 export type Auth = ReturnType<typeof createAuth>;
 
@@ -100,9 +197,23 @@ export async function authSessionReferenceActive(
   ownerId: string,
   sessionId: string,
 ): Promise<boolean> {
+  return (await authSessionReferenceDeadline(transaction, ownerId, sessionId)) !== undefined;
+}
+
+/** Auth-owned expiry proof for callers that must await further work/commit.
+ * The row remains shared-locked on the caller's transaction connection. */
+export async function authSessionReferenceDeadline(
+  transaction: PoolConnection,
+  ownerId: string,
+  sessionId: string,
+): Promise<number | undefined> {
   const [rows] = await transaction.execute<RowDataPacket[]>(
-    "SELECT id FROM session WHERE id=? AND userId=? AND expiresAt>UTC_TIMESTAMP(3) FOR SHARE",
+    "SELECT expiresAt FROM session WHERE id=? AND userId=? AND expiresAt>UTC_TIMESTAMP(3) FOR SHARE",
     [sessionId, ownerId],
   );
-  return rows.length === 1;
+  if (rows.length !== 1) return undefined;
+  const value: unknown = rows[0]?.expiresAt;
+  if (!(value instanceof Date) || !Number.isFinite(value.getTime()))
+    throw new Error("AUTH_SESSION_EXPIRY_INVALID");
+  return value.getTime();
 }

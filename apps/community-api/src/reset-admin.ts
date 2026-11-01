@@ -1,3 +1,4 @@
+import { OperationalError } from "./operational-error.js";
 import { stdin, stdout } from "node:process";
 import { diagnostics } from "./logging/public.js";
 import { createDatabase, readAuthConfig } from "./auth.js";
@@ -19,7 +20,7 @@ async function hiddenPassword(message: string): Promise<string> {
       for (const char of data) {
         if (char === "\u0003") {
           cleanup();
-          reject(new Error("已取消"));
+          reject(new OperationalError("ADMIN_CANCELLED"));
           return;
         }
         if (char === "\r" || char === "\n") {
@@ -36,11 +37,11 @@ async function hiddenPassword(message: string): Promise<string> {
   });
 }
 async function main() {
-  if (!stdin.isTTY || !stdout.isTTY) throw new Error("密码重设需要交互式终端");
+  if (!stdin.isTTY || !stdout.isTTY) throw new OperationalError("ADMIN_TERMINAL_REQUIRED");
   const config = readAuthConfig(process.env);
   const first = await hiddenPassword("新管理员密码（至少 12 位）: ");
   const second = await hiddenPassword("再次输入新密码: ");
-  if (first !== second) throw new Error("两次输入的密码不一致");
+  if (first !== second) throw new OperationalError("ADMIN_PASSWORD_MISMATCH");
   const pool = createDatabase(config.databaseUrl);
   try {
     await resetOnlyAdminPassword(pool, first);

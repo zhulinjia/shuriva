@@ -1,3 +1,4 @@
+import { MigrationVerificationError } from "../migration-error.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -130,7 +131,7 @@ export async function inspectStage8(c: PoolConnection): Promise<void> {
       engine[0]?.ENGINE !== "InnoDB" ||
       engine[0]?.TABLE_TYPE !== "BASE TABLE"
     )
-      throw Error("Mutation table differs from required schema");
+      throw new MigrationVerificationError("Mutation table differs from required schema");
     const [actual] = await c.execute<RowDataPacket[]>(
       "SELECT COLUMN_NAME,COLUMN_TYPE,IS_NULLABLE,COLLATION_NAME,EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?",
       [table],
@@ -143,7 +144,7 @@ export async function inspectStage8(c: PoolConnection): Promise<void> {
           `${r.COLUMN_TYPE}|${r.IS_NULLABLE}|${r.COLLATION_NAME ?? ""}|${r.EXTRA}`,
       )
     )
-      throw Error("Mutation columns differ from required schema");
+      throw new MigrationVerificationError("Mutation columns differ from required schema");
     const [keys] = await c.execute<RowDataPacket[]>(
       "SELECT INDEX_NAME,NON_UNIQUE,GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') AS fields FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? GROUP BY INDEX_NAME,NON_UNIQUE",
       [table],
@@ -153,12 +154,14 @@ export async function inspectStage8(c: PoolConnection): Promise<void> {
       keys.length !== expected.size ||
       keys.some((r) => !expected.has(`${r.INDEX_NAME}|${r.NON_UNIQUE}|${r.fields}`))
     )
-      throw Error("Mutation indexes differ from required schema");
+      throw new MigrationVerificationError("Mutation indexes differ from required schema");
     const [foreign] = await c.execute<RowDataPacket[]>(
       "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND REFERENCED_TABLE_NAME IS NOT NULL",
       [table],
     );
     if (foreign.length)
-      throw Error("Mutation schema must not inherit cascading cross-module relations");
+      throw new MigrationVerificationError(
+        "Mutation schema must not inherit cascading cross-module relations",
+      );
   }
 }

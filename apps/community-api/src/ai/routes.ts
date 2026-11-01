@@ -1,3 +1,4 @@
+import { declareRequestAudit } from "../history/public.js";
 import express, { type ErrorRequestHandler, type Express } from "express";
 import type { AuthenticateOwner } from "../connectors/public.js";
 import type { ModelStore } from "./model-store.js";
@@ -35,14 +36,17 @@ export function mountModelRoutes(
     res.json(store.display(res.locals.ownerId as string));
   });
   router.put("/config", (req, res) => {
+    declareRequestAudit(res, "model.changed");
     store.set(res.locals.ownerId as string, req.body);
     res.json(store.display(res.locals.ownerId as string));
   });
   router.delete("/config", (_req, res) => {
+    declareRequestAudit(res, "model.changed");
     store.clear(res.locals.ownerId as string);
     res.json({ configured: false });
   });
   router.post("/check", async (req, res) => {
+    declareRequestAudit(res, "model.checked");
     const id = res.locals.ownerId as string;
     const body: unknown = req.body;
     if (

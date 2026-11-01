@@ -1,4 +1,4 @@
-> 已归档：此文件为原 PostgreSQL 方案，仅供历史参考。当前有效方案为根目录的 03-SQL安全执行引擎设计.md。
+> 已归档：此文件为原 PostgreSQL 方案，仅供历史参考。当前有效方案见 [SQL 安全执行引擎设计](../docs/03-SQL安全执行引擎设计.md)。
 
 # AI Database Workspace
 

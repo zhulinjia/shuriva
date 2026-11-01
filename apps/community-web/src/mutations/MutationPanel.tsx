@@ -467,6 +467,11 @@ export function MutationPanel({
           void controller.current?.confirm();
         }}
       >
+        {p && Date.parse(p.expiresAt) <= now && (
+          <p role="status" className="mut-notice">
+            预览已过期，本次确认已停用。请取消并重新生成预览，核对后再确认。
+          </p>
+        )}
         <label className="mut-ack">
           <input
             type="checkbox"

@@ -23,7 +23,11 @@ export async function askMutationCandidate(
   schema: ModelSchema,
   writeScope: unknown,
   signal: AbortSignal,
-  options: { beforeRequest?: () => void; onRequestSent?: () => void; semantics?: unknown },
+  options: {
+    beforeRequest?: () => void | Promise<void>;
+    onRequestSent?: () => void;
+    semantics?: unknown;
+  },
 ): Promise<unknown> {
   return askStructuredModel(
     config,

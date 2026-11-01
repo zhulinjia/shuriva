@@ -1,3 +1,4 @@
+import { testSessions, testSessionId } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -43,8 +44,12 @@ const answer = {
   maxRows: 10,
 };
 
-function fixture(options: ConstructorParameters<typeof ModelPlanner>[3] = {}) {
+function fixture(
+  options: ConstructorParameters<typeof ModelPlanner>[3] = {},
+  sessions = testSessions,
+) {
   const scope = {
+    sessionId: testSessionId,
     ownerId: "owner",
     workspaceId: randomUUID(),
     sourceId: randomUUID(),
@@ -60,7 +65,7 @@ function fixture(options: ConstructorParameters<typeof ModelPlanner>[3] = {}) {
   }));
   const config = { baseUrl: "http://127.0.0.1:1234/v1", model: "fixture", apiKey: "fixture-A" };
   models.set(scope.ownerId, config);
-  const read = new ReadService({} as DataSourceStore, {} as ConnectorRegistry);
+  const read = new ReadService({} as DataSourceStore, {} as ConnectorRegistry, sessions);
   const access: ScopedAccess = async (_owner, _workspace, _source, operation) => operation(scope);
   const planner = new ModelPlanner(read, models, access, options);
   const id = randomUUID();
@@ -80,12 +85,7 @@ function fixture(options: ConstructorParameters<typeof ModelPlanner>[3] = {}) {
 }
 
 async function request(f: ReturnType<typeof fixture>) {
-  const preview = await f.planner.preview(
-    f.scope.ownerId,
-    f.scope.workspaceId,
-    f.scope.sourceId,
-    f.id,
-  );
+  const preview = await f.planner.preview(f.scope, f.scope.workspaceId, f.scope.sourceId, f.id);
   assert.ok(preview);
   return {
     ...f.grant,
@@ -95,6 +95,42 @@ async function request(f: ReturnType<typeof fixture>) {
     ...preview.destination,
   };
 }
+
+test("another session cannot reuse a model schema task or disclose with its owner's session", async () => {
+  let requested = 0;
+  const f = fixture({
+    invoke: async () => {
+      requested++;
+      return answer;
+    },
+  });
+  try {
+    const other = { ownerId: f.scope.ownerId, sessionId: randomUUID() };
+    const input = await request(f);
+    await assert.rejects(
+      () => f.planner.preview(other, f.scope.workspaceId, f.scope.sourceId, f.id),
+      /STALE/,
+    );
+    await assert.rejects(
+      () =>
+        f.planner.generate(
+          other,
+          f.scope.workspaceId,
+          f.scope.sourceId,
+          f.id,
+          input,
+          new AbortController().signal,
+        ),
+      /STALE/,
+    );
+    assert.equal(requested, 0);
+    assert.equal(f.read.jobs.status(f.scope, f.id)?.state, "completed");
+    assert.ok(await f.planner.preview(f.scope, f.scope.workspaceId, f.scope.sourceId, f.id));
+    assert.equal(f.read.jobs.claim(f.scope.connectorId), null);
+  } finally {
+    f.read.close();
+  }
+});
 
 function connector(f: ReturnType<typeof fixture>, schema: typeof original = original) {
   const timer = setInterval(() => {
@@ -112,6 +148,53 @@ function connector(f: ReturnType<typeof fixture>, schema: typeof original = orig
   }, 5);
   return () => clearInterval(timer);
 }
+
+test("revoking the initiating session before network send prevents disclosure even after model authorization", async () => {
+  let active = true,
+    ready!: () => void,
+    release!: () => void,
+    sent = 0;
+  const transportReady = new Promise<void>((resolve) => {
+    ready = resolve;
+  });
+  const resume = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const f = fixture(
+    {
+      invoke: async (_config, _question, _schema, _signal, events) => {
+        ready();
+        await resume;
+        await events?.beforeRequest?.();
+        sent++;
+        events?.onRequestSent?.();
+        return answer;
+      },
+    },
+    { ...testSessions, active: async () => active },
+  );
+  const stop = connector(f);
+  try {
+    const input = await request(f);
+    const pending = f.planner.generate(
+      f.scope,
+      f.scope.workspaceId,
+      f.scope.sourceId,
+      f.id,
+      input,
+      new AbortController().signal,
+    );
+    await transportReady;
+    active = false;
+    release();
+    await assert.rejects(pending, /STALE/);
+    assert.equal(sent, 0);
+  } finally {
+    release();
+    stop();
+    f.read.close();
+  }
+});
 
 test("model disclosure contains only reviewed non-sensitive semantics and rejects changed semantic state", async () => {
   let calls = 0;
@@ -147,7 +230,7 @@ test("model disclosure contains only reviewed non-sensitive semantics and reject
       calls++;
       assert.deepEqual(schema.tables[0]?.columns, [{ name: "id", type: "int" }]);
       assert.doesNotMatch(JSON.stringify(events?.semantics), /秘密名称|机密|"column":"name"/);
-      events?.beforeRequest?.();
+      await events?.beforeRequest?.();
       events?.onRequestSent?.();
       return answer;
     },
@@ -160,7 +243,7 @@ test("model disclosure contains only reviewed non-sensitive semantics and reject
     await assert.rejects(
       () =>
         f.planner.generate(
-          f.scope.ownerId,
+          f.scope,
           f.scope.workspaceId,
           f.scope.sourceId,
           f.id,
@@ -174,7 +257,7 @@ test("model disclosure contains only reviewed non-sensitive semantics and reject
     const stop = connector(f);
     try {
       const plan = await f.planner.generate(
-        f.scope.ownerId,
+        f.scope,
         f.scope.workspaceId,
         f.scope.sourceId,
         f.id,
@@ -210,7 +293,7 @@ test("a sent model answer is discarded when business disclosure becomes sensitiv
     const f = fixture({
       semantics: store,
       invoke: async (_config, _question, _schema, _signal, events) => {
-        events?.beforeRequest?.();
+        await events?.beforeRequest?.();
         events?.onRequestSent?.();
         sends++;
         if (changed === "sensitivity") field.sensitivity = "sensitive";
@@ -224,7 +307,7 @@ test("a sent model answer is discarded when business disclosure becomes sensitiv
       await assert.rejects(
         () =>
           f.planner.generate(
-            f.scope.ownerId,
+            f.scope,
             f.scope.workspaceId,
             f.scope.sourceId,
             f.id,
@@ -254,7 +337,7 @@ test("changing model credentials invalidates an already displayed preview", asyn
     f.models.set(f.scope.ownerId, { ...f.config, apiKey: "fixture-B" });
     await assert.rejects(
       f.planner.generate(
-        f.scope.ownerId,
+        f.scope,
         f.scope.workspaceId,
         f.scope.sourceId,
         f.id,
@@ -286,7 +369,7 @@ test("fresh Connector authorization must match every reviewed field and structur
     const input = await request(f);
     await assert.rejects(
       f.planner.generate(
-        f.scope.ownerId,
+        f.scope,
         f.scope.workspaceId,
         f.scope.sourceId,
         f.id,
@@ -318,7 +401,7 @@ test("same names with changed table version are rejected before model contact", 
     const input = await request(f);
     await assert.rejects(
       f.planner.generate(
-        f.scope.ownerId,
+        f.scope,
         f.scope.workspaceId,
         f.scope.sourceId,
         f.id,
@@ -346,7 +429,7 @@ test("matching fresh authorization returns a plan bound to the selected table ve
     const input = await request(f);
     assert.deepEqual(
       await f.planner.generate(
-        f.scope.ownerId,
+        f.scope,
         f.scope.workspaceId,
         f.scope.sourceId,
         f.id,
@@ -379,7 +462,7 @@ test("disconnect or configuration change during confirmation never contacts the 
   try {
     const input = await request(f);
     const pending = f.planner.generate(
-      f.scope.ownerId,
+      f.scope,
       f.scope.workspaceId,
       f.scope.sourceId,
       f.id,
@@ -407,7 +490,7 @@ test("missing Connector confirmation fails closed on cancellation", async () => 
     const input = await request(f);
     await assert.rejects(
       f.planner.generate(
-        f.scope.ownerId,
+        f.scope,
         f.scope.workspaceId,
         f.scope.sourceId,
         f.id,
@@ -447,7 +530,7 @@ test("configuration change aborts a model call already in progress", async () =>
   try {
     const input = await request(f);
     const pending = f.planner.generate(
-      f.scope.ownerId,
+      f.scope,
       f.scope.workspaceId,
       f.scope.sourceId,
       f.id,
@@ -478,7 +561,7 @@ test("near-expired Connector authorization is never sent to the model", async ()
     const input = await request(f);
     await assert.rejects(
       f.planner.generate(
-        f.scope.ownerId,
+        f.scope,
         f.scope.workspaceId,
         f.scope.sourceId,
         f.id,
@@ -517,7 +600,7 @@ test("a stalled request body is aborted before the Connector authorization lease
     const input = await request(f);
     await assert.rejects(
       f.planner.generate(
-        f.scope.ownerId,
+        f.scope,
         f.scope.workspaceId,
         f.scope.sourceId,
         f.id,
@@ -547,7 +630,7 @@ test("a completed request may receive a slow model response after the disclosure
   try {
     const input = await request(f);
     const result = await f.planner.generate(
-      f.scope.ownerId,
+      f.scope,
       f.scope.workspaceId,
       f.scope.sourceId,
       f.id,
@@ -576,7 +659,7 @@ test("a request completing transmission after the disclosure deadline fails clos
     const input = await request(f);
     await assert.rejects(
       f.planner.generate(
-        f.scope.ownerId,
+        f.scope,
         f.scope.workspaceId,
         f.scope.sourceId,
         f.id,
@@ -598,7 +681,7 @@ test("an expired lease prevents request creation after address resolution", asyn
     now: () => Date.now() + offset,
     invoke: async (_config, _question, _schema, _signal, events) => {
       offset = 40_000;
-      events?.beforeRequest?.();
+      await events?.beforeRequest?.();
       created = true;
       return answer;
     },
@@ -608,7 +691,7 @@ test("an expired lease prevents request creation after address resolution", asyn
     const input = await request(f);
     await assert.rejects(
       f.planner.generate(
-        f.scope.ownerId,
+        f.scope,
         f.scope.workspaceId,
         f.scope.sourceId,
         f.id,

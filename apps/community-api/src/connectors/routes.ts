@@ -1,3 +1,4 @@
+import { declareRequestAudit, declareRequestAuditContext } from "../history/public.js";
 import { type SchemaResult, type SchemaTask, schemaResultBodyFields } from "./schema-protocol.js";
 import { signedMessageBodyFields } from "./identity-protocol.js";
 import { createHash } from "node:crypto";
@@ -159,6 +160,10 @@ export function mountConnectorRoutes(
     }
   };
   const api = express.Router();
+  api.use("/:id", (req, res, next) => {
+    declareRequestAuditContext(res, { connectorId: req.params.id });
+    next();
+  });
   api.use((req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     if (req.method !== "GET" && req.headers.origin !== origin) {
@@ -177,6 +182,7 @@ export function mountConnectorRoutes(
     res.json({ connectors: await registry.list(id) });
   });
   api.post("/pairings", async (req, res) => {
+    declareRequestAudit(res, "connection.pairing_created");
     const id = await owner(req.headers);
     if (!id) {
       res.status(401).json({ error: "请先登录" });
@@ -185,6 +191,7 @@ export function mountConnectorRoutes(
     res.status(201).json(await registry.createPairing(id));
   });
   api.post("/:id/diagnostics", async (req, res) => {
+    declareRequestAudit(res, "connection.check_requested", { connectorId: req.params.id });
     const id = await owner(req.headers);
     if (!id) {
       res.status(401).json({ error: "请先登录" });
@@ -194,6 +201,7 @@ export function mountConnectorRoutes(
     res.status(201).json({ ok: true });
   });
   api.post("/:id/revoke", async (req, res) => {
+    declareRequestAudit(res, "connection.revoked", { connectorId: req.params.id });
     const id = await owner(req.headers);
     if (!id) {
       res.status(401).json({ error: "请先登录" });

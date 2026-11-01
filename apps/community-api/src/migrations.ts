@@ -1,3 +1,6 @@
+import { readMigrationCommand } from "./migration-command.js";
+import { OperationalError } from "./operational-error.js";
+import { MigrationVerificationError } from "./migration-error.js";
 import { createHash } from "node:crypto";
 import { diagnostics } from "./logging/public.js";
 import { readFile } from "node:fs/promises";
@@ -172,7 +175,7 @@ async function inspect(c: PoolConnection): Promise<"empty" | "baseline" | "archi
   );
   for (const table of names) {
     const baselineColumns = initialColumns[table];
-    if (!baselineColumns) throw new Error(`Unknown table ${table}`);
+    if (!baselineColumns) throw new MigrationVerificationError(`Unknown table ${table}`);
     const expected = [
       ...baselineColumns,
       ...(table === "workspace" && archived ? ["archivedAt"] : []),
@@ -182,25 +185,30 @@ async function inspect(c: PoolConnection): Promise<"empty" | "baseline" | "archi
       .map((r) => r.COLUMN_NAME)
       .sort();
     if (JSON.stringify(expected) !== JSON.stringify(actual))
-      throw new Error(`Schema differs in ${table}; refusing to assume a migration baseline`);
+      throw new MigrationVerificationError(
+        `Schema differs in ${table}; refusing to assume a migration baseline`,
+      );
   }
   for (const row of columns) {
     if (row.TABLE_NAME === "workspace" && row.COLUMN_NAME === "archivedAt") continue;
     const actual = [row.COLUMN_TYPE, row.IS_NULLABLE, row.COLLATION_NAME ?? ""].join("|");
     if (specifications[row.TABLE_NAME]?.[row.COLUMN_NAME] !== actual)
-      throw new Error(`Schema column ${row.TABLE_NAME}.${row.COLUMN_NAME} does not match baseline`);
+      throw new MigrationVerificationError(
+        `Schema column ${row.TABLE_NAME}.${row.COLUMN_NAME} does not match baseline`,
+      );
   }
   const [engines] = await c.query<ScalarRow[]>(
     "SELECT COUNT(*) AS value FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('user','session','account','verification','workspace') AND ENGINE = 'InnoDB'",
   );
-  if (Number(engines[0]?.value) !== 5) throw new Error("Tables must use InnoDB");
+  if (Number(engines[0]?.value) !== 5)
+    throw new MigrationVerificationError("Tables must use InnoDB");
   const token = columns.find((r) => r.TABLE_NAME === "session" && r.COLUMN_NAME === "token");
   if (
     token?.COLUMN_TYPE !== "varchar(255)" ||
     token.IS_NULLABLE !== "NO" ||
     token.COLLATION_NAME !== "ascii_bin"
   )
-    throw new Error("Session token column does not match baseline");
+    throw new MigrationVerificationError("Session token column does not match baseline");
   if (
     archived &&
     !columns.some(
@@ -211,7 +219,7 @@ async function inspect(c: PoolConnection): Promise<"empty" | "baseline" | "archi
         r.IS_NULLABLE === "YES",
     )
   )
-    throw new Error("Archive column does not match migration");
+    throw new MigrationVerificationError("Archive column does not match migration");
   const [indexRows] = await c.query<IndexRow[]>(
     "SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('user','session','account','verification','workspace') ORDER BY SEQ_IN_INDEX",
   );
@@ -234,18 +242,21 @@ async function inspect(c: PoolConnection): Promise<"empty" | "baseline" | "archi
         JSON.stringify(actual.map((r) => r.COLUMN_NAME)) !== JSON.stringify(fields) ||
         actual.some((r) => Number(r.NON_UNIQUE) !== (unique ? 0 : 1))
       )
-        throw new Error(`Schema index ${table}.${index} does not match baseline`);
+        throw new MigrationVerificationError(
+          `Schema index ${table}.${index} does not match baseline`,
+        );
     }
   }
   const [fk] = await c.query<ScalarRow[]>(
     "SELECT COUNT(*) AS value FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=DATABASE() AND ((TABLE_NAME='session' AND COLUMN_NAME='userId' AND REFERENCED_TABLE_NAME='user' AND REFERENCED_COLUMN_NAME='id') OR (TABLE_NAME='account' AND COLUMN_NAME='userId' AND REFERENCED_TABLE_NAME='user' AND REFERENCED_COLUMN_NAME='id') OR (TABLE_NAME='workspace' AND COLUMN_NAME='createdByAccountId' AND REFERENCED_TABLE_NAME='user' AND REFERENCED_COLUMN_NAME='id'))",
   );
-  if (Number(fk[0]?.value) !== 3) throw new Error("Foreign keys do not match baseline");
+  if (Number(fk[0]?.value) !== 3)
+    throw new MigrationVerificationError("Foreign keys do not match baseline");
   const [rules] = await c.query<ScalarRow[]>(
     "SELECT COUNT(*) AS value FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND ((CONSTRAINT_NAME IN ('session_user_fk', 'account_user_fk') AND DELETE_RULE='CASCADE') OR (CONSTRAINT_NAME='workspace_owner_fk' AND DELETE_RULE='RESTRICT'))",
   );
   if (Number(rules[0]?.value) !== 3)
-    throw new Error("Foreign key delete rules do not match baseline");
+    throw new MigrationVerificationError("Foreign key delete rules do not match baseline");
   return archived ? "archived" : "baseline";
 }
 
@@ -264,10 +275,10 @@ export async function migrateDatabase(pool: Pool): Promise<void> {
   let locked = false;
   try {
     const [db] = await c.query<ScalarRow[]>("SELECT DATABASE() AS value");
-    if (!db[0]?.value) throw new Error("No database selected");
+    if (!db[0]?.value) throw new OperationalError("MIGRATION_NO_DATABASE");
     const lockName = `aw-migrate-${createHash("sha256").update(String(db[0].value)).digest("hex").slice(0, 40)}`;
     const [lock] = await c.execute<ScalarRow[]>("SELECT GET_LOCK(?, 15) AS value", [lockName]);
-    if (Number(lock[0]?.value) !== 1) throw new Error("Could not acquire migration lock");
+    if (Number(lock[0]?.value) !== 1) throw new OperationalError("MIGRATION_LOCK_UNAVAILABLE");
     locked = true;
     const first = await migrationFile("001-auth-workspaces.sql");
     const second = await migrationFile("002-workspace-archive.sql");
@@ -299,34 +310,34 @@ export async function migrateDatabase(pool: Pool): Promise<void> {
                       ? sixth.checksum
                       : null;
         if (!expected || expected !== item.checksum)
-          throw new Error(`Unknown or altered migration ${item.version}`);
+          throw new MigrationVerificationError(`Unknown or altered migration ${item.version}`);
       }
       if (history.some((x) => x.version === "002") && state !== "archived")
-        throw new Error("Migration history does not match schema");
+        throw new MigrationVerificationError("Migration history does not match schema");
       if (history.some((x) => x.version === "001") && state === "empty")
-        throw new Error("Migration history does not match schema");
+        throw new MigrationVerificationError("Migration history does not match schema");
       if (history.some((x) => x.version === "003")) {
         if (
           !history.some((x) => x.version === "001") ||
           !history.some((x) => x.version === "002") ||
           state !== "archived"
         )
-          throw new Error("Migration history does not match schema");
+          throw new MigrationVerificationError("Migration history does not match schema");
         await inspectStage3(c);
       }
       if (history.some((x) => x.version === "004")) {
         if (!history.some((x) => x.version === "003"))
-          throw new Error("Semantic migration requires stage 3");
+          throw new MigrationVerificationError("Semantic migration requires stage 3");
         await inspectStage6(c);
       }
       if (history.some((x) => x.version === "005")) {
         if (!history.some((x) => x.version === "004"))
-          throw new Error("History migration requires semantics");
+          throw new MigrationVerificationError("History migration requires semantics");
         await inspectStage7(c);
       }
       if (history.some((x) => x.version === "006")) {
         if (!history.some((x) => x.version === "005"))
-          throw new Error("Mutations require history migration");
+          throw new MigrationVerificationError("Mutations require history migration");
         await inspectStage8(c);
       }
     }
@@ -337,7 +348,8 @@ export async function migrateDatabase(pool: Pool): Promise<void> {
         .filter(Boolean))
         await c.query(statement);
       state = await inspect(c);
-      if (state !== "baseline") throw new Error("Baseline verification failed");
+      if (state !== "baseline")
+        throw new MigrationVerificationError("Baseline verification failed");
     }
     await c.query(
       "CREATE TABLE IF NOT EXISTS `_workspace_migrations` (version VARCHAR(32) NOT NULL PRIMARY KEY, checksum CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, appliedAt DATETIME(3) NOT NULL) ENGINE=InnoDB",
@@ -349,7 +361,8 @@ export async function migrateDatabase(pool: Pool): Promise<void> {
     if (state === "baseline") {
       await c.query(second.sql.trim().replace(/;\s*$/, ""));
       state = await inspect(c);
-      if (state !== "archived") throw new Error("Archive migration verification failed");
+      if (state !== "archived")
+        throw new MigrationVerificationError("Archive migration verification failed");
     }
     await c.execute(
       "INSERT IGNORE INTO `_workspace_migrations` (version, checksum, appliedAt) VALUES ('002', ?, UTC_TIMESTAMP(3))",
@@ -376,7 +389,7 @@ async function inspectCurrentConnection(
   hasMutations: boolean;
 }> {
   if ((await inspect(c)) !== "archived")
-    throw new Error("Database schema is not at the current migration version");
+    throw new MigrationVerificationError("Database schema is not at the current migration version");
   const [history] = await c.query<MigrationRow[]>(
     "SELECT version, checksum FROM _workspace_migrations ORDER BY version",
   );
@@ -399,16 +412,24 @@ async function inspectCurrentConnection(
     (stage7Enabled && history.length < 5) ||
     (stage8Enabled && history.length !== 6)
   )
-    throw new Error("Database migration history is missing or differs from the SQL files");
+    throw new MigrationVerificationError(
+      "Database migration history is missing or differs from the SQL files",
+    );
   if (history.length < 4 && (await stage6TableCount(c)) !== 0)
-    throw new Error("Semantic table exists without verified history; inspect manually");
+    throw new MigrationVerificationError(
+      "Semantic table exists without verified history; inspect manually",
+    );
   if (history.length >= 3) await inspectStage3(c);
   if (history.length < 5 && (await stage7TableCount(c)) !== 0)
-    throw new Error("History table exists without verified history; inspect manually");
+    throw new MigrationVerificationError(
+      "History table exists without verified history; inspect manually",
+    );
   if (history.length >= 4) await inspectStage6(c);
   if (history.length >= 5) await inspectStage7(c);
   if (history.length < 6 && (await stage8TableCount(c)) !== 0)
-    throw new Error("Mutation tables exist without verified history; inspect manually");
+    throw new MigrationVerificationError(
+      "Mutation tables exist without verified history; inspect manually",
+    );
   if (history.length === 6) await inspectStage8(c);
   return {
     hasStage3: history.length >= 3,
@@ -446,13 +467,13 @@ export async function migrateStage3(pool: Pool): Promise<void> {
   let locked = false;
   try {
     const [db] = await c.query<ScalarRow[]>("SELECT DATABASE() AS value");
-    if (!db[0]?.value) throw new Error("No database selected");
+    if (!db[0]?.value) throw new OperationalError("MIGRATION_NO_DATABASE");
     const lockName = `aw-migrate-${createHash("sha256").update(String(db[0].value)).digest("hex").slice(0, 40)}`;
     const [lock] = await c.execute<ScalarRow[]>("SELECT GET_LOCK(?, 15) AS value", [lockName]);
-    if (Number(lock[0]?.value) !== 1) throw new Error("Could not acquire migration lock");
+    if (Number(lock[0]?.value) !== 1) throw new OperationalError("MIGRATION_LOCK_UNAVAILABLE");
     locked = true;
     if ((await inspect(c)) !== "archived")
-      throw new Error("Existing migrations must be verified first");
+      throw new MigrationVerificationError("Existing migrations must be verified first");
     const [history] = await c.query<MigrationRow[]>(
       "SELECT version, checksum FROM _workspace_migrations ORDER BY version",
     );
@@ -467,32 +488,34 @@ export async function migrateStage3(pool: Pool): Promise<void> {
       history[1]?.version !== "002" ||
       history[1]?.checksum !== second.checksum
     )
-      throw new Error("Existing migration history differs");
+      throw new MigrationVerificationError("Existing migration history differs");
     if (history.length >= 3) {
       if (history[2]?.version !== "003" || history[2]?.checksum !== third.checksum)
-        throw new Error("Stage 3 migration history differs");
+        throw new MigrationVerificationError("Stage 3 migration history differs");
       await inspectStage3(c);
       if (history.length >= 4) {
         const fourth = await stage6MigrationFile();
         if (history[3]?.version !== "004" || history[3]?.checksum !== fourth.checksum)
-          throw new Error("Stage 6 migration history differs");
+          throw new MigrationVerificationError("Stage 6 migration history differs");
         await inspectStage6(c);
       }
       if (history.length >= 5) {
         const fifth = await stage7MigrationFile();
         if (history[4]?.version !== "005" || history[4]?.checksum !== fifth.checksum)
-          throw new Error("Stage 7 migration history differs");
+          throw new MigrationVerificationError("Stage 7 migration history differs");
         await inspectStage7(c);
       }
       if (history.length === 6) {
         const sixth = await stage8MigrationFile();
         if (history[5]?.version !== "006" || history[5]?.checksum !== sixth.checksum)
-          throw new Error("Mutation migration history differs");
+          throw new MigrationVerificationError("Mutation migration history differs");
         await inspectStage8(c);
       }
     } else {
       if ((await stage3TableCount(c)) !== 0)
-        throw new Error("Stage 3 tables already exist without verified history; inspect manually");
+        throw new MigrationVerificationError(
+          "Stage 3 tables already exist without verified history; inspect manually",
+        );
       for (const statement of third.sql
         .split(";")
         .map((item) => item.trim())
@@ -518,13 +541,13 @@ export async function migrateStage6(pool: Pool): Promise<void> {
   let locked = false;
   try {
     const [db] = await c.query<ScalarRow[]>("SELECT DATABASE() AS value");
-    if (!db[0]?.value) throw new Error("No database selected");
+    if (!db[0]?.value) throw new OperationalError("MIGRATION_NO_DATABASE");
     const lockName = `aw-migrate-${createHash("sha256").update(String(db[0].value)).digest("hex").slice(0, 40)}`;
     const [lock] = await c.execute<ScalarRow[]>("SELECT GET_LOCK(?, 15) AS value", [lockName]);
-    if (Number(lock[0]?.value) !== 1) throw new Error("Could not acquire migration lock");
+    if (Number(lock[0]?.value) !== 1) throw new OperationalError("MIGRATION_LOCK_UNAVAILABLE");
     locked = true;
     if ((await inspect(c)) !== "archived")
-      throw new Error("Existing migrations must be verified first");
+      throw new MigrationVerificationError("Existing migrations must be verified first");
     const [history] = await c.query<MigrationRow[]>(
       "SELECT version, checksum FROM _workspace_migrations ORDER BY version",
     );
@@ -543,7 +566,7 @@ export async function migrateStage6(pool: Pool): Promise<void> {
         (entry, i) => entry.version !== `00${i + 1}` || entry.checksum !== files[i]?.checksum,
       )
     )
-      throw new Error("Existing migration history differs");
+      throw new MigrationVerificationError("Existing migration history differs");
     await inspectStage3(c);
     if (history.length >= 4) {
       await inspectStage6(c);
@@ -551,9 +574,11 @@ export async function migrateStage6(pool: Pool): Promise<void> {
       if (history.length === 6) await inspectStage8(c);
     } else {
       if ((await stage6TableCount(c)) !== 0)
-        throw new Error("Semantic table exists without verified history; inspect manually");
+        throw new MigrationVerificationError(
+          "Semantic table exists without verified history; inspect manually",
+        );
       const fourth = files[3];
-      if (!fourth) throw new Error("Semantic migration missing");
+      if (!fourth) throw new MigrationVerificationError("Semantic migration missing");
       await c.query(fourth.sql.trim().replace(/;\s*$/, ""));
       await inspectStage6(c);
       await c.execute(
@@ -575,13 +600,13 @@ export async function migrateStage7(pool: Pool): Promise<void> {
   let locked = false;
   try {
     const [db] = await c.query<ScalarRow[]>("SELECT DATABASE() AS value");
-    if (!db[0]?.value) throw new Error("No database selected");
+    if (!db[0]?.value) throw new OperationalError("MIGRATION_NO_DATABASE");
     const lockName = `aw-migrate-${createHash("sha256").update(String(db[0].value)).digest("hex").slice(0, 40)}`;
     const [lock] = await c.execute<ScalarRow[]>("SELECT GET_LOCK(?, 15) AS value", [lockName]);
-    if (Number(lock[0]?.value) !== 1) throw new Error("Could not acquire migration lock");
+    if (Number(lock[0]?.value) !== 1) throw new OperationalError("MIGRATION_LOCK_UNAVAILABLE");
     locked = true;
     if ((await inspect(c)) !== "archived")
-      throw new Error("Existing migrations must be verified first");
+      throw new MigrationVerificationError("Existing migrations must be verified first");
     const [history] = await c.query<MigrationRow[]>(
       "SELECT version, checksum FROM _workspace_migrations ORDER BY version",
     );
@@ -600,7 +625,7 @@ export async function migrateStage7(pool: Pool): Promise<void> {
         (entry, i) => entry.version !== `00${i + 1}` || entry.checksum !== files[i]?.checksum,
       )
     )
-      throw new Error("Existing migration history differs");
+      throw new MigrationVerificationError("Existing migration history differs");
     await inspectStage3(c);
     await inspectStage6(c);
     if (history.length >= 5) {
@@ -608,9 +633,11 @@ export async function migrateStage7(pool: Pool): Promise<void> {
       if (history.length === 6) await inspectStage8(c);
     } else {
       if ((await stage7TableCount(c)) !== 0)
-        throw new Error("History table exists without verified history; inspect manually");
+        throw new MigrationVerificationError(
+          "History table exists without verified history; inspect manually",
+        );
       const file = files[4];
-      if (!file) throw new Error("History migration missing");
+      if (!file) throw new MigrationVerificationError("History migration missing");
       await c.query(file.sql.trim().replace(/;\s*$/, ""));
       await inspectStage7(c);
       await c.execute(
@@ -632,15 +659,15 @@ export async function migrateStage8(pool: Pool): Promise<void> {
   let locked = false;
   try {
     const [db] = await c.query<ScalarRow[]>("SELECT DATABASE() AS value");
-    if (!db[0]?.value) throw new Error("No database selected");
+    if (!db[0]?.value) throw new OperationalError("MIGRATION_NO_DATABASE");
     const lockName = `aw-migrate-${createHash("sha256").update(String(db[0].value)).digest("hex").slice(0, 40)}`;
     const [lock] = await c.execute<ScalarRow[]>("SELECT GET_LOCK(?,15) AS value", [lockName]);
-    if (Number(lock[0]?.value) !== 1) throw new Error("Could not acquire migration lock");
+    if (Number(lock[0]?.value) !== 1) throw new OperationalError("MIGRATION_LOCK_UNAVAILABLE");
     locked = true;
     const current = await inspectCurrentConnection(c, true, true, true);
     if (!current.hasMutations) {
       if ((await stage8TableCount(c)) !== 0)
-        throw new Error("Partial mutation schema requires manual review");
+        throw new MigrationVerificationError("Partial mutation schema requires manual review");
       const file = await stage8MigrationFile();
       for (const statement of file.sql
         .split(";")
@@ -662,21 +689,13 @@ export async function migrateStage8(pool: Pool): Promise<void> {
 }
 
 async function main() {
-  const url = process.env.DATABASE_URL?.trim();
-  if (!url || new URL(url).protocol !== "mysql:")
-    throw new Error("DATABASE_URL must be a MySQL database URL");
-  const pool = createDatabase(url);
+  const { databaseUrl, stage } = readMigrationCommand(process.env, process.argv.slice(2));
+  const pool = createDatabase(databaseUrl);
   try {
-    if (
-      process.argv.slice(2).length > 1 ||
-      (process.argv[2] &&
-        !["--stage3", "--stage6", "--stage7", "--stage8"].includes(process.argv[2]))
-    )
-      throw new Error("Unknown migration option");
-    if (process.argv[2] === "--stage3") await migrateStage3(pool);
-    else if (process.argv[2] === "--stage6") await migrateStage6(pool);
-    else if (process.argv[2] === "--stage7") await migrateStage7(pool);
-    else if (process.argv[2] === "--stage8") await migrateStage8(pool);
+    if (stage === "stage3") await migrateStage3(pool);
+    else if (stage === "stage6") await migrateStage6(pool);
+    else if (stage === "stage7") await migrateStage7(pool);
+    else if (stage === "stage8") await migrateStage8(pool);
     else await migrateDatabase(pool);
     console.log("Database migrations verified and applied.");
   } finally {

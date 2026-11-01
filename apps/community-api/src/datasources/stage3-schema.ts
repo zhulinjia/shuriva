@@ -1,3 +1,4 @@
+import { MigrationVerificationError } from "../migration-error.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -74,31 +75,31 @@ export async function inspectStage3(connection: PoolConnection): Promise<void> {
     "SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('data_source','workspace_data_source','workspace_default_source','schema_scan','schema_snapshot')",
   );
   if (tables.length !== Object.keys(specs).length || tables.some((row) => row.ENGINE !== "InnoDB"))
-    throw new Error("Stage 3 tables differ from expected schema");
+    throw new MigrationVerificationError("Stage 3 tables differ from expected schema");
   const [columns] = await connection.query<RowDataPacket[]>(
     "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLLATION_NAME, EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('data_source','workspace_data_source','workspace_default_source','schema_scan','schema_snapshot')",
   );
   for (const [table, expected] of Object.entries(specs)) {
     const actual = columns.filter((row) => row.TABLE_NAME === table);
     if (actual.length !== Object.keys(expected).length)
-      throw new Error(`Stage 3 columns differ in ${table}`);
+      throw new MigrationVerificationError(`Stage 3 columns differ in ${table}`);
     for (const row of actual) {
       const description = [row.COLUMN_TYPE, row.IS_NULLABLE, row.COLLATION_NAME ?? ""].join("|");
       if (expected[String(row.COLUMN_NAME)] !== description)
-        throw new Error(`Stage 3 columns differ in ${table}`);
+        throw new MigrationVerificationError(`Stage 3 columns differ in ${table}`);
       if (
         table === "schema_scan" &&
         row.COLUMN_NAME === "sequence" &&
         row.EXTRA !== "auto_increment"
       )
-        throw new Error("Stage 3 scan sequence is not auto-incrementing");
+        throw new MigrationVerificationError("Stage 3 scan sequence is not auto-incrementing");
     }
   }
   const [keys] = await connection.query<RowDataPacket[]>(
     "SELECT k.CONSTRAINT_NAME, k.TABLE_NAME, GROUP_CONCAT(k.COLUMN_NAME ORDER BY k.ORDINAL_POSITION SEPARATOR ',') AS columnsUsed, k.REFERENCED_TABLE_NAME, GROUP_CONCAT(k.REFERENCED_COLUMN_NAME ORDER BY k.ORDINAL_POSITION SEPARATOR ',') AS referencedColumns, r.DELETE_RULE FROM information_schema.KEY_COLUMN_USAGE k JOIN information_schema.REFERENTIAL_CONSTRAINTS r ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME AND r.TABLE_NAME = k.TABLE_NAME WHERE k.CONSTRAINT_SCHEMA = DATABASE() AND k.TABLE_NAME IN ('data_source','workspace_data_source','workspace_default_source','schema_scan','schema_snapshot') AND k.REFERENCED_TABLE_NAME IS NOT NULL GROUP BY k.CONSTRAINT_NAME, k.TABLE_NAME, k.REFERENCED_TABLE_NAME, r.DELETE_RULE",
   );
   if (keys.length !== Object.keys(foreignKeys).length)
-    throw new Error("Stage 3 foreign keys differ");
+    throw new MigrationVerificationError("Stage 3 foreign keys differ");
   for (const row of keys) {
     const description = [
       row.TABLE_NAME,
@@ -108,7 +109,7 @@ export async function inspectStage3(connection: PoolConnection): Promise<void> {
       row.DELETE_RULE,
     ].join("|");
     if (foreignKeys[String(row.CONSTRAINT_NAME)] !== description)
-      throw new Error("Stage 3 foreign keys differ");
+      throw new MigrationVerificationError("Stage 3 foreign keys differ");
   }
   const [indexes] = await connection.query<RowDataPacket[]>(
     "SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') AS columnsUsed FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('data_source','workspace_data_source','workspace_default_source','schema_scan','schema_snapshot') GROUP BY TABLE_NAME, INDEX_NAME, NON_UNIQUE",
@@ -128,9 +129,9 @@ export async function inspectStage3(connection: PoolConnection): Promise<void> {
     ),
   );
   if (required.some((index) => !actualIndexes.has(index)))
-    throw new Error("Stage 3 indexes differ");
+    throw new MigrationVerificationError("Stage 3 indexes differ");
   if (!actualIndexes.has("schema_scan|scan_dispatch|1|connectorId,status,sequence,expiresAt"))
-    throw new Error("Stage 3 dispatch index differs");
+    throw new MigrationVerificationError("Stage 3 dispatch index differs");
   if (indexes.filter((index) => Number(index.NON_UNIQUE) === 0).length !== required.length)
-    throw new Error("Stage 3 unique indexes differ");
+    throw new MigrationVerificationError("Stage 3 unique indexes differ");
 }

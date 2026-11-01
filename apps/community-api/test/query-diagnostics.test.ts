@@ -1,3 +1,4 @@
+import { testSessions, testSessionId } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -14,12 +15,13 @@ test("query registration emits correlation IDs even when history is disabled, wi
     },
   });
   const scope = {
+    sessionId: testSessionId,
     ownerId: randomUUID(),
     workspaceId: randomUUID(),
     sourceId: randomUUID(),
     connectorId: randomUUID(),
   };
-  const service = new ReadService({} as ScopeSourceLookup, {} as QueryConnector);
+  const service = new ReadService({} as ScopeSourceLookup, {} as QueryConnector, testSessions);
   const sql = "SELECT sensitive_business_value FROM orders WHERE secret = ?";
   try {
     await withDiagnostics(logger, {}, async () => {

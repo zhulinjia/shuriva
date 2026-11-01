@@ -25,9 +25,11 @@ export const mutationAISendSchema = z.strictObject({
 type DisclosurePlanner = Pick<ModelPlanner, "preview" | "generateAuthorized">;
 type Preview = NonNullable<Awaited<ReturnType<ModelPlanner["preview"]>>>;
 type PreparedInput = z.infer<typeof mutationAIPrepareSchema>;
+type AIScope = MutationScope & { sessionId: string };
 type Ticket = {
   id: string;
   binding: MutationBinding;
+  sessionId: string;
   input: PreparedInput;
   readPreview: Preview;
   context: MutationAIContext;
@@ -88,14 +90,9 @@ export class MutationAIPlanner {
       )
       .digest("base64url");
   }
-  private async current(scope: MutationScope, input: PreparedInput) {
+  private async current(scope: AIScope, input: PreparedInput) {
     const binding = await this.access.withScope(scope, async (value) => value);
-    const preview = await this.base.preview(
-      scope.ownerId,
-      scope.workspaceId,
-      scope.sourceId,
-      input.taskId,
-    );
+    const preview = await this.base.preview(scope, scope.workspaceId, scope.sourceId, input.taskId);
     if (!preview) throw new MutationAIError("STALE");
     // Neither the registry lock nor a platform transaction is held over a reply.
     const capability = await this.capability(scope);
@@ -110,7 +107,7 @@ export class MutationAIPlanner {
       disclosureHash: this.digest(input.question, preview, context),
     };
   }
-  async prepare(scope: MutationScope, raw: unknown, signal?: AbortSignal) {
+  async prepare(scope: AIScope, raw: unknown, signal?: AbortSignal) {
     const input = mutationAIPrepareSchema.parse(raw);
     this.prune();
     if (
@@ -135,6 +132,7 @@ export class MutationAIPlanner {
     this.tickets.set(id, {
       id,
       binding: prepared.binding,
+      sessionId: scope.sessionId,
       input,
       readPreview: prepared.preview,
       context: prepared.context,
@@ -156,7 +154,7 @@ export class MutationAIPlanner {
     };
   }
   async generate(
-    scope: MutationScope,
+    scope: AIScope,
     raw: unknown,
     signal: AbortSignal,
     progress: (stage: PlanStage) => void = () => {},
@@ -169,6 +167,7 @@ export class MutationAIPlanner {
       ticket.sending ||
       ticket.expiresAt <= this.now() ||
       ticket.disclosureHash !== input.disclosureHash ||
+      ticket.sessionId !== scope.sessionId ||
       ticket.binding.ownerId !== scope.ownerId ||
       ticket.binding.workspaceId !== scope.workspaceId ||
       ticket.binding.sourceId !== scope.sourceId ||
@@ -193,7 +192,7 @@ export class MutationAIPlanner {
         ...ticket.readPreview.destination,
       };
       return await this.base.generateAuthorized(
-        scope.ownerId,
+        scope,
         scope.workspaceId,
         scope.sourceId,
         ticket.input.taskId,

@@ -38,13 +38,49 @@ type ReadParameter struct {
 	Value string `json:"value"`
 }
 type ReadRequest struct {
-	SQL           string          `json:"sql"`
-	Parameters    []ReadParameter `json:"parameters"`
-	MaxRows       int             `json:"maxRows"`
-	SchemaVersion *string         `json:"schemaVersion"`
+	SQL            string              `json:"sql"`
+	Parameters     []ReadParameter     `json:"parameters"`
+	MaxRows        int                 `json:"maxRows"`
+	SchemaVersion  *string             `json:"schemaVersion"`
+	DelegatedScope map[string][]string `json:"delegatedScope"`
 }
 
 var schemaVersionPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// uniqueJSONObject uses the standard JSON decoder while rejecting duplicate
+// keys before Go's struct/map decoding can silently replace an earlier value.
+func uniqueJSONObject(raw []byte, limit int) (map[string]json.RawMessage, error) {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	start, err := d.Token()
+	if err != nil || start != json.Delim('{') {
+		return nil, errors.New("invalid read payload")
+	}
+	fields := make(map[string]json.RawMessage)
+	for d.More() {
+		keyToken, err := d.Token()
+		key, ok := keyToken.(string)
+		if err != nil || !ok || len(fields) >= limit {
+			return nil, errors.New("invalid read payload")
+		}
+		if _, duplicate := fields[key]; duplicate {
+			return nil, errors.New("invalid read payload")
+		}
+		var value json.RawMessage
+		if err := d.Decode(&value); err != nil {
+			return nil, errors.New("invalid read payload")
+		}
+		fields[key] = value
+	}
+	end, err := d.Token()
+	if err != nil || end != json.Delim('}') {
+		return nil, errors.New("invalid read payload")
+	}
+	var extra any
+	if err = d.Decode(&extra); err != io.EOF {
+		return nil, errors.New("invalid read payload")
+	}
+	return fields, nil
+}
 
 func ReadTaskFields(t ReadTask) []string {
 	hash := sha256.Sum256([]byte(t.Payload))
@@ -86,18 +122,47 @@ func VerifyReadTask(t ReadTask, connectorID, platformKey string, now time.Time) 
 	if err != nil || !utf8.Valid(raw) || base64.RawURLEncoding.EncodeToString(raw) != t.Payload {
 		return empty, errors.New("invalid read payload")
 	}
-	if t.Operation == "model_schema" || t.Operation == "model_authorize" {
+	if t.Operation == "model_authorize" {
 		if string(raw) != "{}" {
 			return empty, errors.New("invalid model schema payload")
 		}
 		return empty, nil
 	}
+	if t.Operation == "model_schema" {
+		if string(raw) == "{}" {
+			return empty, nil
+		}
+		shape, err := uniqueJSONObject(raw, 1)
+		if err != nil || len(shape) != 1 || shape["delegatedScope"] == nil {
+			return empty, errors.New("invalid delegated schema payload")
+		}
+		tables, err := uniqueJSONObject(shape["delegatedScope"], 256)
+		if err != nil || len(tables) == 0 {
+			return empty, errors.New("invalid delegated schema payload")
+		}
+		var payload struct {
+			DelegatedScope map[string][]string `json:"delegatedScope"`
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&payload); err != nil || payload.DelegatedScope == nil {
+			return empty, errors.New("invalid delegated schema payload")
+		}
+		empty.DelegatedScope = payload.DelegatedScope
+		return empty, nil
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var request ReadRequest
-	var shape map[string]json.RawMessage
-	if json.Unmarshal(raw, &shape) != nil || len(shape) != 4 || shape["schemaVersion"] == nil {
+	shape, shapeErr := uniqueJSONObject(raw, 5)
+	if shapeErr != nil || len(shape) != 5 || shape["sql"] == nil || shape["parameters"] == nil || shape["maxRows"] == nil || shape["schemaVersion"] == nil || shape["delegatedScope"] == nil {
 		return empty, errors.New("invalid read payload")
+	}
+	if !bytes.Equal(bytes.TrimSpace(shape["delegatedScope"]), []byte("null")) {
+		tables, err := uniqueJSONObject(shape["delegatedScope"], 256)
+		if err != nil || len(tables) == 0 {
+			return empty, errors.New("invalid read payload")
+		}
 	}
 	if err = decoder.Decode(&request); err != nil {
 		return empty, errors.New("invalid read payload")

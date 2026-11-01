@@ -18,7 +18,12 @@ type Fixture struct {
 
 func New(t *testing.T) *Fixture {
 	t.Helper()
-	m, err := Load(os.Getenv("STAGE8_G3_MANIFEST"))
+	manifestPath := os.Getenv("STAGE8_G3_MANIFEST")
+	if manifestPath == "" {
+		t.Skip("isolated MySQL test requires an explicit fresh STAGE8_G3_MANIFEST")
+	}
+	// An explicitly supplied but invalid manifest must fail, never fall back or skip.
+	m, err := Load(manifestPath)
 	if err != nil {
 		t.Fatal("explicit fresh G3 manifest required: ", err)
 	}

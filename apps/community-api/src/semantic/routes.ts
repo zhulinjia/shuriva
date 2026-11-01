@@ -1,3 +1,4 @@
+import { declareRequestAudit, declareRequestAuditContext } from "../history/public.js";
 import express, { type ErrorRequestHandler, type Express } from "express";
 import { diagnostics } from "../logging/public.js";
 import type { AuthenticateOwner } from "../connectors/public.js";
@@ -13,6 +14,14 @@ export function mountSemanticRoutes(
   read: SemanticRead,
 ): void {
   const router = express.Router();
+  router.use("/:workspace/:source", (req, res, next) => {
+    declareRequestAuditContext(res, {
+      workspaceId: req.params.workspace,
+      sourceId: req.params.source,
+      targetId: req.params.source,
+    });
+    next();
+  });
   router.use((req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     if (req.method !== "GET" && req.headers.origin !== origin) {
@@ -39,6 +48,11 @@ export function mountSemanticRoutes(
     );
   });
   router.put("/:workspace/:source", async (req, res) => {
+    declareRequestAudit(res, "source.changed", {
+      workspaceId: req.params.workspace,
+      sourceId: req.params.source,
+      targetId: req.params.source,
+    });
     const value: unknown = req.body;
     if (
       !value ||

@@ -1,3 +1,4 @@
+import { MigrationVerificationError } from "../migration-error.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -21,7 +22,7 @@ export async function inspectStage7(c: PoolConnection): Promise<void> {
     "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='history_entry'",
   );
   if (tables.length !== 1 || tables[0]?.ENGINE !== "InnoDB")
-    throw Error("History table differs from expected schema");
+    throw new MigrationVerificationError("History table differs from expected schema");
   const expected: Record<string, string> = {
     id: "varchar(36)|NO|utf8mb4_0900_ai_ci|",
     sequence: "bigint unsigned|NO||auto_increment",
@@ -46,7 +47,7 @@ export async function inspectStage7(c: PoolConnection): Promise<void> {
         `${row.COLUMN_TYPE}|${row.IS_NULLABLE}|${row.COLLATION_NAME ?? ""}|${row.EXTRA}`,
     )
   )
-    throw Error("History columns differ from expected schema");
+    throw new MigrationVerificationError("History columns differ from expected schema");
   const [indexes] = await c.query<RowDataPacket[]>(
     "SELECT INDEX_NAME,NON_UNIQUE,GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',') AS fields FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='history_entry' GROUP BY INDEX_NAME,NON_UNIQUE",
   );
@@ -62,7 +63,7 @@ export async function inspectStage7(c: PoolConnection): Promise<void> {
     indexes.length !== expectedIndexes.size ||
     indexes.some((row) => !expectedIndexes.has(`${row.INDEX_NAME}|${row.NON_UNIQUE}|${row.fields}`))
   )
-    throw Error("History indexes differ");
+    throw new MigrationVerificationError("History indexes differ");
   const [keys] = await c.query<RowDataPacket[]>(
     "SELECT k.CONSTRAINT_NAME,k.COLUMN_NAME,k.REFERENCED_TABLE_NAME,k.REFERENCED_COLUMN_NAME,r.DELETE_RULE FROM information_schema.KEY_COLUMN_USAGE k JOIN information_schema.REFERENTIAL_CONSTRAINTS r ON r.CONSTRAINT_SCHEMA=k.CONSTRAINT_SCHEMA AND r.CONSTRAINT_NAME=k.CONSTRAINT_NAME AND r.TABLE_NAME=k.TABLE_NAME WHERE k.TABLE_SCHEMA=DATABASE() AND k.TABLE_NAME='history_entry' AND k.REFERENCED_TABLE_NAME IS NOT NULL",
   );
@@ -80,5 +81,5 @@ export async function inspectStage7(c: PoolConnection): Promise<void> {
         ),
     )
   )
-    throw Error("History foreign keys differ");
+    throw new MigrationVerificationError("History foreign keys differ");
 }

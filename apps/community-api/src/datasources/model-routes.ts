@@ -42,7 +42,7 @@ export function mountDataSourceModelRoutes(
     let preview: Awaited<ReturnType<ModelPlanner["preview"]>>;
     try {
       preview = await planner.preview(
-        res.locals.ownerId as string,
+        { ownerId: res.locals.ownerId as string, sessionId: res.locals.sessionId as string },
         req.params.workspaceId,
         req.params.sourceId,
         req.params.id,
@@ -144,7 +144,7 @@ export function mountDataSourceModelRoutes(
       let result: Awaited<ReturnType<ModelPlanner["generate"]>>;
       try {
         result = await planner.generate(
-          res.locals.ownerId as string,
+          { ownerId: res.locals.ownerId as string, sessionId: res.locals.sessionId as string },
           req.params.workspaceId,
           req.params.sourceId,
           req.params.id,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { validId } from "../datasources/public.js";
 
 export const historyKinds = ["conversation", "artifact", "execution", "audit"] as const;
 export type HistoryKind = (typeof historyKinds)[number];
@@ -131,6 +132,8 @@ export const auditSchema = z.strictObject({
   connectorId: id.optional(),
   executionId: id.optional(),
   targetId: id.optional(),
+  attemptedWorkspaceId: z.string().refine(validId).optional(),
+  attemptedSourceId: z.string().refine(validId).optional(),
 });
 export type Conversation = z.infer<typeof conversationSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;

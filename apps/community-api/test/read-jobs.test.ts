@@ -2,14 +2,89 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { ReadJobs } from "../src/queries/jobs.js";
+import { testSessionId } from "./session-fixture.js";
 
 const scope = {
+  sessionId: testSessionId,
   ownerId: "owner",
   connectorId: "11111111-1111-4111-8111-111111111111",
   workspaceId: "22222222-2222-4222-8222-222222222222",
   sourceId: "33333333-3333-4333-8333-333333333333",
 };
 const parameters = [{ kind: "integer", value: "1" }];
+
+test("delegated schema task carries an immutable narrow scope and binds it to request identity", () => {
+  const jobs = new ReadJobs(() => 1_000_000);
+  try {
+    const id = randomUUID(),
+      columns = ["id"];
+    const grant: Array<[string, string[]]> = [["customers", columns]];
+    jobs.createDelegatedModelSchema(scope, id, grant);
+    columns.push("secret");
+    assert.throws(() => jobs.createDelegatedModelSchema(scope, id, grant), /CONFLICT/);
+    const work = jobs.claim(scope.connectorId);
+    assert.ok(work && work.type === "read");
+    assert.equal(work.task.operation, "model_schema");
+    assert.deepEqual(JSON.parse(Buffer.from(work.task.payload, "base64url").toString("utf8")), {
+      delegatedScope: { customers: ["id"] },
+    });
+    assert.throws(() => jobs.createDelegatedModelSchema(scope, randomUUID(), []), /INVALID/);
+  } finally {
+    jobs.close();
+  }
+});
+
+test("delegated read scope is copied into the signed payload and cannot change on retry", () => {
+  const jobs = new ReadJobs(() => 1_000_000);
+  try {
+    const id = randomUUID();
+    const columns = ["id", "name"];
+    const delegation: Array<[string, string[]]> = [["customers", columns]];
+    jobs.createDelegated(scope, id, "SELECT id FROM customers", [], 10, null, delegation);
+    columns[0] = "secret";
+    assert.throws(
+      () => jobs.createDelegated(scope, id, "SELECT id FROM customers", [], 10, null, delegation),
+      /CONFLICT/,
+    );
+    const work = jobs.claim(scope.connectorId);
+    assert.ok(work && work.type === "read");
+    const decoded = JSON.parse(Buffer.from(work.task.payload, "base64url").toString("utf8"));
+    assert.deepEqual(decoded.delegatedScope, { customers: ["id", "name"] });
+    for (const invalid of [
+      null,
+      {},
+      [],
+      [["customers", []]],
+      [["customers", ["id", "id"]]],
+      [["customers", ["id;"]]],
+      [
+        ["customers", ["id"]],
+        ["customers", ["name"]],
+      ],
+      Array.from({ length: 257 }, () => ["customers", ["id"]]),
+      Array.from({ length: 256 }, (_, table) => [
+        `table_${table}`,
+        Array.from({ length: 256 }, (_, column) => `column_${column}`),
+      ]),
+    ]) {
+      assert.throws(
+        () =>
+          jobs.createDelegated(
+            scope,
+            randomUUID(),
+            "SELECT id FROM customers",
+            [],
+            10,
+            null,
+            invalid,
+          ),
+        /INVALID/,
+      );
+    }
+  } finally {
+    jobs.close();
+  }
+});
 
 test("read jobs bind scope, suppress sensitive input, and reject late results after cancellation", () => {
   const jobs = new ReadJobs(() => 1_000_000);

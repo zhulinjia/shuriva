@@ -25,6 +25,7 @@ import {
   cellDisplay,
   compareResultCells,
   isNumericColumn,
+  isCompleteEmptyResult,
   resultChartData,
   type VisualizationDefinition,
 } from "./result-presentation";
@@ -144,7 +145,7 @@ function ResultTable({ result }: { result: QueryResult }) {
           </select>
         </label>
       </div>
-      {!result.rows.length && <p>查询成功，未返回匹配的数据。</p>}
+      {isCompleteEmptyResult(result) && <p>查询成功，未返回匹配的数据。</p>}
     </>
   );
 }

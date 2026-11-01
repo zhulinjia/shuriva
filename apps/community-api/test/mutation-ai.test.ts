@@ -18,6 +18,7 @@ import type { MutationAccess, MutationCapability } from "../src/mutations/ports.
 
 function aiFixture(now?: () => number) {
   const binding = {
+    sessionId: randomUUID(),
     ownerId: randomUUID(),
     workspaceId: randomUUID(),
     sourceId: randomUUID(),
@@ -107,7 +108,7 @@ function aiFixture(now?: () => number) {
   };
   const access: MutationAccess = {
     async authenticate() {
-      return { ownerId: binding.ownerId, sessionId: randomUUID() };
+      return { ownerId: binding.ownerId, sessionId: binding.sessionId };
     },
     async withScope(scope, operation) {
       if (
@@ -127,7 +128,7 @@ function aiFixture(now?: () => number) {
       return { schema, semantics, schemaHash: "a".repeat(64), destination };
     },
     async generateAuthorized<T>(
-      _owner: string,
+      _actor: { ownerId: string; sessionId: string },
       _workspace: string,
       _source: string,
       _task: string,
@@ -164,7 +165,7 @@ function aiFixture(now?: () => number) {
   const planner = new MutationAIPlanner(base, access, async () => capability, apiBoot, {
     ...(now ? { now } : {}),
     invoke: async (_config, _question, sentSchema, writes, _signal, options) => {
-      options.beforeRequest?.();
+      await options.beforeRequest?.();
       options.onRequestSent?.();
       requested++;
       assert.deepEqual(
@@ -243,7 +244,7 @@ test("dedicated mutation AI HTTP requires login, Origin and exact reviewed conse
       ...f.access,
       authenticate: async (headers) =>
         headers["x-test-auth"] === "yes"
-          ? { ownerId: f.binding.ownerId, sessionId: randomUUID() }
+          ? { ownerId: f.binding.ownerId, sessionId: f.binding.sessionId }
           : undefined,
     },
     f.planner,

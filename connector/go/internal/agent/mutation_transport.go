@@ -26,6 +26,11 @@ type MutationHandler interface {
 }
 
 type mutationDelivery struct{ fingerprint string }
+
+// A retryable poll outage, distinct from an invalid signature or binding.
+// Authorization requests still must never be retried after an ambiguous reply.
+var ErrMutationTransportUnavailable = errors.New("mutation transport unavailable")
+
 type mutationPacket struct {
 	OK     bool   `json:"ok"`
 	Result any    `json:"result,omitempty"`
@@ -115,7 +120,7 @@ func (c *Client) mutationRequest(ctx context.Context, message protocol.MutationM
 	response, err := c.HTTP.Do(request)
 	if err != nil {
 		event.Outcome = "unavailable"
-		return protocol.MutationMessage{}, errors.New("mutation transport unavailable")
+		return protocol.MutationMessage{}, ErrMutationTransportUnavailable
 	}
 	event.Outcome, event.RequestID = "success", response.Header.Get("X-Request-Id")
 	if response.StatusCode != http.StatusOK {

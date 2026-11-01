@@ -5,6 +5,7 @@ import { DataSourceError } from "../datasources/public.js";
 import type { HistoryRead } from "../queries/public.js";
 import type { HistoryStore } from "./store.js";
 import type { HistoryKind, HistoryScope } from "./model.js";
+import { declareRequestAuditContext } from "./request-audit.js";
 
 export function mountHistoryRoutes(
   server: Express,
@@ -14,6 +15,14 @@ export function mountHistoryRoutes(
   read: HistoryRead | undefined,
 ) {
   const router = express.Router();
+  router.use("/:workspace/:source", (req, res, next) => {
+    declareRequestAuditContext(res, {
+      workspaceId: req.params.workspace,
+      sourceId: req.params.source,
+      targetId: req.params.source,
+    });
+    next();
+  });
   router.use((req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     if (req.method !== "GET" && req.headers.origin !== origin) {

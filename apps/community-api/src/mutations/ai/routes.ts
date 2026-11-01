@@ -42,8 +42,12 @@ export function mountMutationAIRoutes(
     }
     next();
   });
-  const scope = (req: express.Request, res: express.Response): MutationScope => ({
+  const scope = (
+    req: express.Request,
+    res: express.Response,
+  ): MutationScope & { sessionId: string } => ({
     ownerId: (res.locals.mutationIdentity as MutationIdentity).ownerId,
+    sessionId: (res.locals.mutationIdentity as MutationIdentity).sessionId,
     workspaceId: mutationId.parse(req.params.workspace),
     sourceId: mutationId.parse(req.params.source),
   });

@@ -453,14 +453,15 @@ export class MutationStore {
         freeze.set(receipt.targetIdentity, { code, executionId: receipt.executionId });
         if (record) freeze.set(record.targetIdentity, { code, executionId: receipt.executionId });
       }
-      for (const identity of [...freeze.keys()].sort()) {
+      for (const [identity, reason] of [...freeze.entries()].sort(([a], [b]) =>
+        a < b ? -1 : a > b ? 1 : 0,
+      )) {
         const alreadyFrozen = await this.target(c, identity, true, false);
-        const reason = freeze.get(identity);
         await c.execute("UPDATE mutation_target SET frozen=1,code=? WHERE identity=?", [
-          reason?.code,
+          reason.code,
           identity,
         ]);
-        if (!alreadyFrozen && reason)
+        if (!alreadyFrozen)
           await this.outbox(c, scope, reason.executionId, "mutation.target_frozen");
       }
       return { items: missing, metadataError };

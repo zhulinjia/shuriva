@@ -5,6 +5,7 @@ import { ScopeCoordinator, type ScopeSourceLookup } from "../datasources/public.
 import { ReadJobs } from "./jobs.js";
 import type { ExecutionState, ExecutionSummary, QueryJournal } from "./journal.js";
 import type { ReadResult, ReadTask } from "../protocol/read-task.js";
+import type { SessionAccess } from "../auth/public.js";
 
 type Scope = { ownerId: string; connectorId: string; workspaceId: string; sourceId: string };
 type CancelTask = Omit<ReadTask, "payload" | "operation"> & { operation: "cancel_read" };
@@ -27,6 +28,64 @@ export class ReadService {
   >();
   private readonly journalTimer?: NodeJS.Timeout;
   private flushing = false;
+  private closed = false;
+  private readonly sessionWatches = new Set<() => void>();
+  authenticate(headers: Parameters<SessionAccess["authenticate"]>[0]) {
+    return this.sessions.authenticate(headers);
+  }
+  private async sessionActive(scope: Scope, id: string, nonce: string): Promise<boolean> {
+    if (this.closed) return false;
+    const identity = this.jobs.sessionIdentity(scope, id);
+    return (
+      identity?.taskNonce === nonce &&
+      (await this.sessions.active(identity)) &&
+      !this.closed &&
+      this.jobs.sessionIdentity(scope, id)?.taskNonce === nonce
+    );
+  }
+  async assertSession(scope: Scope, id: string, expectedSessionId?: string) {
+    if (this.closed) throw new Error("STALE");
+    const identity = this.jobs.sessionIdentity(scope, id);
+    if (!identity || (expectedSessionId !== undefined && identity.sessionId !== expectedSessionId))
+      throw new Error("STALE");
+    const active = await this.sessions.active(identity);
+    if (this.closed || this.jobs.sessionIdentity(scope, id)?.taskNonce !== identity.taskNonce)
+      throw new Error("STALE");
+    if (!active) {
+      this.jobs.cancel(scope, id);
+      throw new Error("STALE");
+    }
+    return identity;
+  }
+  /** Final sends recheck the database directly. Polling also aborts waits and
+   * in-flight replies after logout, external reset or expiration. */
+  async watchSession(scope: Scope, id: string, expectedSessionId?: string) {
+    await this.assertSession(scope, id, expectedSessionId);
+    if (this.closed) throw new Error("STALE");
+    if (this.sessionWatches.size >= 16) throw new Error("CAPACITY");
+    const controller = new AbortController();
+    let checking = false;
+    const dispose = () => {
+      clearInterval(timer);
+      this.sessionWatches.delete(stop);
+    };
+    const stop = () => {
+      controller.abort();
+      dispose();
+    };
+    const timer = setInterval(() => {
+      if (checking) return;
+      checking = true;
+      void this.assertSession(scope, id, expectedSessionId)
+        .catch(stop)
+        .finally(() => {
+          checking = false;
+        });
+    }, 500);
+    timer.unref();
+    this.sessionWatches.add(stop);
+    return { signal: controller.signal, dispose };
+  }
   /** Recheck current access and serialize publication with unbinding and Connector revocation. */
   async withCurrentReadScope<T>(
     scope: Omit<Scope, "connectorId">,
@@ -37,6 +96,7 @@ export class ReadService {
   constructor(
     private readonly store: ScopeSourceLookup,
     private readonly registry: QueryConnector,
+    private readonly sessions: SessionAccess,
     private readonly journal?: QueryJournal,
     readonly coordinator = new ScopeCoordinator(store, registry),
   ) {
@@ -127,6 +187,9 @@ export class ReadService {
   }
 
   close(): void {
+    this.closed = true;
+    for (const stop of this.sessionWatches) stop();
+    this.sessionWatches.clear();
     if (this.journalTimer) clearInterval(this.journalTimer);
     this.jobs.close();
     this.bindingTokens.clear();
@@ -286,12 +349,20 @@ export class ReadService {
         source.connectorId !== connectorId ||
         this.jobs.status(scope, work.task.id)?.state !== "running"
       ) {
-        this.jobs.reject(scope, work.task.id);
+        this.jobs.reject(scope, work.task.id, work.task.nonce);
+        return null;
+      }
+      if (!(await this.sessionActive(scope, work.task.id, work.task.nonce))) {
+        this.jobs.reject(scope, work.task.id, work.task.nonce);
         return null;
       }
       const signed = await this.registry.issueReadTask(work.task);
       await this.flushHistory();
-      if (this.jobs.status(scope, work.task.id)?.state !== "running") return null;
+      if (!(await this.sessionActive(scope, work.task.id, work.task.nonce))) {
+        this.jobs.reject(scope, work.task.id, work.task.nonce);
+        return null;
+      }
+      if (!this.jobs.markDispatched(scope, work.task.id, work.task.nonce)) return null;
       diagnostics.info("query.dispatched", {
         taskId: work.task.id,
         sourceId: scope.sourceId,

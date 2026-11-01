@@ -155,6 +155,15 @@ func (r *ReadRunner) execute(ctx context.Context, task protocol.ReadTask) (resul
 	if profile.ID != task.SourceID {
 		return nil, datasource.ErrScope
 	}
+	if (task.Operation == "read_query" || task.Operation == "model_schema") && request.DelegatedScope != nil {
+		restricted, err := datasource.IntersectDelegatedReadScope(profile.ReadScopes[task.WorkspaceID], request.DelegatedScope)
+		if err != nil {
+			return nil, datasource.ErrScope
+		}
+		// The task is authenticated before this point. Replace the local copy only;
+		// never widen or persist the Connector's own policy.
+		profile.ReadScopes = map[string]map[string][]string{task.WorkspaceID: restricted}
+	}
 	if task.Operation == "model_schema" || task.Operation == "model_authorize" {
 		if task.Operation == "model_authorize" {
 			if !profile.Allows(task.WorkspaceID) || len(profile.ReadScopes[task.WorkspaceID]) == 0 {

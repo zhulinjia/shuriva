@@ -8,9 +8,9 @@ import type { AuthenticateOwner } from "../connectors/public.js";
 import { DataSourceError } from "../datasources/public.js";
 import { type AuditEntry, auditSchema, type HistoryScope } from "./model.js";
 import type { HistoryStore } from "./store.js";
+import { declaredRequestAudit, requestAuditContext } from "./request-audit.js";
 
 type AuditScope = Pick<HistoryScope, "workspaceId" | "sourceId"> | null;
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const queuedEvent = z.strictObject({
   id: z.string().uuid(),
   owner: z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/),
@@ -155,10 +155,7 @@ export class AuditTrail {
     this.closed = true;
     clearInterval(this.timer);
   }
-  middleware(
-    owner: AuthenticateOwner,
-    category: "source" | "connection" | "model" | "security" | "workspace",
-  ): RequestHandler {
+  middleware(owner: AuthenticateOwner): RequestHandler {
     return async (req, res, next) => {
       const actor = await owner(req.headers);
       if (!actor) {
@@ -176,67 +173,29 @@ export class AuditTrail {
         res.status(503).json({ error: "AUDIT_UNAVAILABLE" });
         return;
       }
-      const path = req.path;
-      // Paths are used only for fixed classification and UUID scope extraction; never retained.
-      const parts = path.split("/");
-      const workspace =
-        parts[1] === "workspaces" ? parts[2] : category === "security" ? parts[1] : undefined;
-      const source =
-        parts[1] === "workspaces" ? parts[3] : category === "security" ? parts[2] : undefined;
-      const scope: AuditScope =
-        workspace && source && uuid.test(workspace) && uuid.test(source)
-          ? { workspaceId: workspace, sourceId: source }
-          : null;
       res.once("finish", () => {
+        const declared = declaredRequestAudit(res);
+        const context = requestAuditContext(res);
         const record = (entry: AuditEntry) => {
           try {
-            this.record(actor, entry, scope);
+            this.record(actor, entry, declared?.scope ?? context?.scope ?? null);
           } catch (error) {
             diagnostics.error("audit.completed_request_unavailable", {}, error);
           }
         };
         if (res.statusCode === 403) {
-          record({ event: "security.denied", outcome: "denied" });
+          record({
+            ...context?.identifiers,
+            ...declared?.entry,
+            event: "security.denied",
+            outcome: "denied",
+          });
           return;
         }
-        if (req.method === "GET" || category === "security") return;
-        if (category === "source" && path.endsWith("model-plan")) return;
-        if (
-          category === "source" &&
-          path.includes("/queries") &&
-          res.statusCode < 400 &&
-          !path.endsWith("model-plan")
-        )
+        if (!declared || req.method === "GET" || (declared.failureOnly && res.statusCode < 400))
           return;
-        let event: AuditEntry["event"] =
-          category === "model"
-            ? path.endsWith("/check")
-              ? "model.checked"
-              : "model.changed"
-            : category === "connection"
-              ? "connection.checked"
-              : category === "source"
-                ? "source.changed"
-                : "security.denied";
-        if (category === "source") {
-          if (path.includes("/queries")) event = "query.failed";
-          else if (path.endsWith("/scan")) event = "source.scanned";
-          else if (path === "/" && req.method === "POST") event = "source.created";
-          else if (path.startsWith("/workspaces/"))
-            event = req.method === "DELETE" ? "source.unbound" : "source.bound";
-        }
-        if (category === "connection" && path.endsWith("/revoke")) event = "connection.revoked";
-        if (category === "connection" && path.endsWith("/pairings"))
-          event = "connection.pairing_created";
-        if (category === "connection" && path.endsWith("/diagnostics"))
-          event = "connection.check_requested";
-        if (category === "workspace") {
-          if (path.endsWith("/archive")) event = "workspace.archived";
-          else if (path.endsWith("/restore")) event = "workspace.restored";
-          else return;
-        }
         record({
-          event,
+          ...declared.entry,
           outcome: res.statusCode < 400 ? "success" : "failure",
         });
       });
@@ -252,11 +211,14 @@ export class AuditTrail {
       }
       res.json(this.health());
     });
-    server.use("/api/data-sources", this.middleware(owner, "source"));
-    server.use("/api/connectors", this.middleware(owner, "connection"));
-    server.use("/api/model", this.middleware(owner, "model"));
-    server.use("/api/semantics", this.middleware(owner, "source"));
-    server.use("/api/workspaces", this.middleware(owner, "workspace"));
-    server.use("/api/history", this.middleware(owner, "security"));
+    for (const prefix of [
+      "data-sources",
+      "connectors",
+      "model",
+      "semantics",
+      "workspaces",
+      "history",
+    ])
+      server.use(`/api/${prefix}`, this.middleware(owner));
   }
 }

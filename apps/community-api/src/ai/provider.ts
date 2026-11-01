@@ -42,7 +42,11 @@ export async function askModel(
   question: string,
   schema: ModelSchema,
   signal?: AbortSignal,
-  options: { beforeRequest?: () => void; onRequestSent?: () => void; semantics?: unknown } = {},
+  options: {
+    beforeRequest?: () => void | Promise<void>;
+    onRequestSent?: () => void;
+    semantics?: unknown;
+  } = {},
 ): Promise<unknown> {
   return askStructuredModel(config, question, schema, signal, options, {
     instruction,
@@ -62,7 +66,11 @@ export async function askStructuredModel(
   question: string,
   schema: ModelSchema,
   signal: AbortSignal | undefined,
-  options: { beforeRequest?: () => void; onRequestSent?: () => void; semantics?: unknown },
+  options: {
+    beforeRequest?: () => void | Promise<void>;
+    onRequestSent?: () => void;
+    semantics?: unknown;
+  },
   generation: { instruction: string; validate(value: unknown): unknown },
 ): Promise<unknown> {
   const verifiedSchema = decodeModelDisclosure(schema).schema;

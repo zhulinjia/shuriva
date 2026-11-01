@@ -72,7 +72,7 @@ export function modelFetch(
   resolveHost: (host: string) => Promise<Array<{ address: string; family: number }>> = (host) =>
     lookup(host, { all: true, verbatim: true }),
   onRequestSent?: () => void,
-  beforeRequest?: () => void,
+  beforeRequest?: () => void | Promise<void>,
 ): typeof globalThis.fetch {
   const endpoint = modelEndpoint(baseUrl);
   let used = false;
@@ -108,7 +108,8 @@ export function modelFetch(
     const target = records[0];
     if (!target) throw new Error("INVALID_ENDPOINT");
     if (combined.aborted) throw new Error("MODEL_UNAVAILABLE");
-    beforeRequest?.();
+    await beforeRequest?.();
+    if (combined.aborted) throw new Error("MODEL_UNAVAILABLE");
     if (used) throw new Error("MODEL_UNAVAILABLE");
     used = true;
     const raw = await new Promise<Buffer>((resolve, reject) => {

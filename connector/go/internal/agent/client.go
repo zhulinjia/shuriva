@@ -22,6 +22,9 @@ import (
 
 type APIError struct{ Status int }
 
+// Stable classification without retaining URLs, TLS internals or credentials.
+var ErrPlatformUnavailable = errors.New("cannot reach platform; check connectivity and TLS")
+
 func (e *APIError) Error() string {
 	if e.Status == 426 {
 		return "protocol version is not supported"
@@ -117,7 +120,7 @@ func (c *Client) post(ctx context.Context, path string, body any, expectedProtoc
 	response, err := c.HTTP.Do(request)
 	if err != nil {
 		event.Outcome = "unavailable"
-		return errors.New("cannot reach platform; check connectivity and TLS")
+		return ErrPlatformUnavailable
 	}
 	event.Outcome, event.RequestID = "success", response.Header.Get("X-Request-Id")
 	if response.StatusCode != http.StatusOK {

@@ -43,6 +43,7 @@ export function ChatWorkspace({
   const conversation = useConversationHistory(
     workspaceId,
     sourceId,
+    messages,
     historyCapability === "enabled",
     historySaved,
   );

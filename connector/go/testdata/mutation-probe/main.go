@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,6 +78,9 @@ func run() error {
 	if os.Getenv("STAGE8_G3_REVIEW") == "1" {
 		lifetime = 16 * time.Minute
 	}
+	if os.Getenv("STAGE8_G4_ACCEPTANCE") == "1" {
+		lifetime = 45 * time.Minute
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), lifetime)
 	defer cancel()
 	if admin.PingContext(ctx) != nil {
@@ -89,6 +93,7 @@ func run() error {
 		OwnerID     string `json:"ownerId"`
 		WorkspaceID string `json:"workspaceId"`
 		SourceID    string `json:"sourceId"`
+		Reconnect   bool   `json:"reconnect"`
 	}
 	if decoder.Decode(&input) != nil {
 		return errors.New("invalid isolated probe input")
@@ -215,7 +220,8 @@ func run() error {
 	if json.NewEncoder(os.Stdout).Encode(struct {
 		Ready       bool   `json:"ready"`
 		ConnectorID string `json:"connectorId"`
-	}{true, config.ConnectorID}) != nil {
+		Catalog     string `json:"catalog"`
+	}{true, config.ConnectorID, catalog}) != nil {
 		return errors.New("fixture readiness unavailable")
 	}
 	var start struct {
@@ -234,7 +240,14 @@ func run() error {
 	}()
 	for ctx.Err() == nil {
 		if err = agent.Sync(ctx, client, config, identity); err != nil && ctx.Err() == nil {
-			return fmt.Errorf("signed fixture sync failed: %w", err)
+			var network net.Error
+			var api *agent.APIError
+			transient := errors.Is(err, agent.ErrMutationTransportUnavailable) || errors.Is(err, agent.ErrPlatformUnavailable) || errors.As(err, &network) || (errors.As(err, &api) && api.Status == 503)
+			if !input.Reconnect || os.Getenv("STAGE8_G4_ACCEPTANCE") != "1" || !transient {
+				return fmt.Errorf("signed fixture sync failed: %w", err)
+			}
+			// Only the dedicated process-fault fixture retries an owned API outage.
+			// Signature/permission failures remain fatal; no arbitrary SQL is retried.
 		}
 		select {
 		case <-ctx.Done():

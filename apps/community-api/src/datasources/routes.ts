@@ -2,7 +2,7 @@ import express, { type ErrorRequestHandler, type Express } from "express";
 import { diagnostics } from "../logging/public.js";
 import type { ModelStore } from "../ai/public.js";
 import type { ConnectorAuthorization, AuthenticateOwner } from "../connectors/public.js";
-import type { AuditRecorder } from "../history/public.js";
+import { declareRequestAuditContext, type AuditRecorder } from "../history/public.js";
 import type { WorkspaceRead } from "../queries/public.js";
 import type { SemanticReader } from "../semantic/public.js";
 import { DataSourceError, type DataSourceStore } from "./store.js";
@@ -26,6 +26,22 @@ export function mountDataSourceRoutes(
   audit?: AuditRecorder,
 ): void {
   const router = express.Router();
+  router.use("/workspaces/:workspaceId", (req, res, next) => {
+    declareRequestAuditContext(res, { targetId: req.params.workspaceId });
+    next();
+  });
+  router.use("/workspaces/:workspaceId/:sourceId", (req, res, next) => {
+    declareRequestAuditContext(res, {
+      workspaceId: req.params.workspaceId,
+      sourceId: req.params.sourceId,
+      targetId: req.params.sourceId,
+    });
+    next();
+  });
+  router.use("/:id", (req, res, next) => {
+    declareRequestAuditContext(res, { targetId: req.params.id });
+    next();
+  });
   router.use((req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
     if (req.method !== "GET" && req.headers.origin !== origin) {
@@ -36,12 +52,14 @@ export function mountDataSourceRoutes(
   });
   router.use(express.json({ limit: read ? "32kb" : "8kb" }));
   router.use(async (req, res, next) => {
+    const identity = read ? await read.authenticate(req.headers) : undefined;
     const id = await owner(req.headers);
-    if (!id) {
+    if (!id || (read && identity?.ownerId !== id)) {
       res.status(401).json({ error: "请先登录" });
       return;
     }
     res.locals.ownerId = id;
+    res.locals.sessionId = identity?.sessionId;
     next();
   });
   const context = createDataSourceRouteContext(store, registry, scope, read);

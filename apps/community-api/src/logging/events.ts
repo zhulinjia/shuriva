@@ -1,5 +1,6 @@
 /** Diagnostics accept fixed event codes; free-form text is never a log API. */
 const events = new Set([
+  "auth.session_cleanup_failed",
   "diagnostic.invalid_event",
   "diagnostic.file_unavailable",
   "diagnostic.close_failed",

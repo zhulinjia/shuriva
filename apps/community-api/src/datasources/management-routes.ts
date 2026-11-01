@@ -1,3 +1,4 @@
+import { declareRequestAudit } from "../history/public.js";
 import type { Router } from "express";
 import { DataSourceError, validId, validSourceName } from "./store.js";
 import type { DataSourceRouteContext } from "./route-context.js";
@@ -35,6 +36,7 @@ export function mountDataSourceManagementRoutes(
     res.json(await store.list(res.locals.ownerId as string, archived === "true", after));
   });
   router.patch("/:id", async (req, res) => {
+    declareRequestAudit(res, "source.changed", { targetId: req.params.id });
     if (
       !req.body ||
       typeof req.body !== "object" ||
@@ -46,14 +48,17 @@ export function mountDataSourceManagementRoutes(
     res.json({ ok: true });
   });
   router.delete("/:id", async (req, res) => {
+    declareRequestAudit(res, "source.changed", { targetId: req.params.id });
     await store.archive(res.locals.ownerId as string, req.params.id);
     res.json({ ok: true });
   });
   router.post("/:id/restore", async (req, res) => {
+    declareRequestAudit(res, "source.changed", { targetId: req.params.id });
     await store.restore(res.locals.ownerId as string, req.params.id);
     res.json({ ok: true });
   });
   router.put("/:id/connector", async (req, res) => {
+    declareRequestAudit(res, "source.changed", { targetId: req.params.id });
     if (
       !req.body ||
       typeof req.body !== "object" ||
@@ -69,7 +74,12 @@ export function mountDataSourceManagementRoutes(
     res.json({ ok: true });
   });
   router.post("/", async (req, res) => {
+    declareRequestAudit(res, "source.created");
     if (!createBody(req.body)) throw new DataSourceError("INVALID");
+    declareRequestAudit(res, "source.created", {
+      targetId: req.body.id,
+      connectorId: req.body.connectorId,
+    });
     const actor = res.locals.ownerId as string;
     if (!(await registry.isActiveOwner(actor, req.body.connectorId)))
       throw new DataSourceError("NOT_FOUND");
@@ -106,12 +116,22 @@ export function mountDataSourceManagementRoutes(
     });
   });
   router.put("/workspaces/:workspaceId/:sourceId", async (req, res) => {
+    declareRequestAudit(res, "source.bound", {
+      workspaceId: req.params.workspaceId,
+      sourceId: req.params.sourceId,
+      targetId: req.params.sourceId,
+    });
     await inWorkspace(req.params.workspaceId, () =>
       store.bind(res.locals.ownerId as string, req.params.workspaceId, req.params.sourceId),
     );
     res.status(201).json({ ok: true });
   });
   router.delete("/workspaces/:workspaceId/:sourceId", async (req, res) => {
+    declareRequestAudit(res, "source.unbound", {
+      workspaceId: req.params.workspaceId,
+      sourceId: req.params.sourceId,
+      targetId: req.params.sourceId,
+    });
     await inWorkspace(req.params.workspaceId, async () => {
       await store.unbind(res.locals.ownerId as string, req.params.workspaceId, req.params.sourceId);
       read?.invalidateBinding(
@@ -128,6 +148,11 @@ export function mountDataSourceManagementRoutes(
     res.json({ ok: true });
   });
   router.put("/workspaces/:workspaceId/:sourceId/default", async (req, res) => {
+    declareRequestAudit(res, "source.changed", {
+      workspaceId: req.params.workspaceId,
+      sourceId: req.params.sourceId,
+      targetId: req.params.sourceId,
+    });
     await store.setDefault(
       res.locals.ownerId as string,
       req.params.workspaceId,
