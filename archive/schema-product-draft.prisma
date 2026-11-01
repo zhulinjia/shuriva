@@ -1,0 +1,909 @@
+// 本文件是完整产品设计草稿，不反映当前认证与工作区 SQL 表；不可直接用于迁移现有开发库。
+// 实际当前表结构见 apps/community-api/migrations/001-auth-workspaces.sql，扩展前需统一模型及迁移历史。
+// MySQL 初稿；依赖版本、迁移及行为尚未在真实数据库验证。
+// 所有 DateTime 按 UTC 应用约定处理；连接与时区需集成测试。
+// Action 模型为设计初稿；写入安全验证通过前禁止对用户数据源写入。
+
+generator client {
+  provider = "prisma-client"
+  output   = "./packages/storage-prisma/src/generated"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum DatabaseEngine {
+  MYSQL
+}
+
+enum ConnectorStatus {
+  PENDING
+  ONLINE
+  OFFLINE
+  REVOKED
+}
+
+enum DataSourceStatus {
+  PENDING
+  CONNECTED
+  DISCONNECTED
+  ERROR
+  DISABLED
+}
+
+enum WorkspaceStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ConversationStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum MessageRole {
+  SYSTEM
+  USER
+  ASSISTANT
+  TOOL
+}
+
+enum AgentRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  TIMED_OUT
+}
+
+enum AgentStepStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+enum AgentStepType {
+  INTENT_ANALYSIS
+  SCHEMA_RETRIEVAL
+  SQL_PLANNING
+  POLICY_CHECK
+  QUERY_EXECUTION
+  RESULT_ANALYSIS
+  UI_GENERATION
+  MCP_TOOL_CALL
+  ACTION_PLANNING
+  OTHER
+}
+
+enum QueryRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  TIMED_OUT
+}
+
+enum ExecutionOrigin {
+  WEB
+  DESKTOP
+  MCP
+  API
+  SYSTEM
+}
+
+enum ActionType {
+  INSERT
+  UPDATE
+  DELETE
+}
+
+enum ActionProposalStatus {
+  DRAFT
+  AWAITING_CONFIRMATION
+  CONFIRMED
+  REJECTED
+  EXPIRED
+  EXECUTED
+}
+
+enum ActionExecutionStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum ArtifactType {
+  SAVED_QUERY
+  VISUALIZATION
+  ANALYSIS
+}
+
+enum SensitivityLevel {
+  PUBLIC
+  INTERNAL
+  CONFIDENTIAL
+  RESTRICTED
+}
+
+enum SemanticRelationshipType {
+  ONE_TO_ONE
+  ONE_TO_MANY
+  MANY_TO_ONE
+  MANY_TO_MANY
+}
+
+enum McpTransport {
+  STDIO
+  STREAMABLE_HTTP
+}
+
+enum McpInvocationDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum McpInvocationStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum AuditActorType {
+  LOCAL_ACCOUNT
+  API_KEY
+  SYSTEM
+  MCP_CLIENT
+  CONNECTOR
+}
+
+model LocalAccount {
+  id                 String   @id @default(uuid()) @db.Char(36)
+  username           String   @unique @db.VarChar(64)
+  passwordHash       String   @db.VarChar(255)
+  displayName        String?  @db.VarChar(100)
+  isActive            Boolean  @default(true)
+  mustChangePassword Boolean  @default(false)
+
+  lastLoginAt DateTime? @db.DateTime(6)
+  createdAt   DateTime  @default(now()) @db.DateTime(6)
+  updatedAt   DateTime  @updatedAt @db.DateTime(6)
+
+  sessions             LocalSession[]
+  apiKeys              ApiKey[]
+  createdWorkspaces    Workspace[]       @relation("WorkspaceCreator")
+  createdConversations Conversation[]    @relation("ConversationCreator")
+  authoredMessages     Message[]          @relation("MessageAuthor")
+  createdPairings      ConnectorPairing[] @relation("PairingCreator")
+  proposedActions      ActionProposal[]   @relation("ActionProposer")
+  confirmedActions     ActionProposal[]   @relation("ActionConfirmer")
+  executedActions      ActionExecution[]  @relation("ActionExecutor")
+  createdArtifacts     SavedArtifact[]    @relation("ArtifactCreator")
+  queryRuns            QueryRun[]         @relation("QueryRequester")
+}
+
+model LocalSession {
+  id        String @id @default(uuid()) @db.Char(36)
+  accountId String @db.Char(36)
+  tokenHash String @unique @db.VarChar(255)
+
+  expiresAt  DateTime  @db.DateTime(6)
+  revokedAt  DateTime? @db.DateTime(6)
+  lastSeenAt DateTime? @db.DateTime(6)
+  createdAt  DateTime  @default(now()) @db.DateTime(6)
+
+  account LocalAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, expiresAt])
+}
+
+model ApiKey {
+  id        String @id @default(uuid()) @db.Char(36)
+  accountId String @db.Char(36)
+
+  name      String  @db.VarChar(100)
+  keyPrefix String  @db.VarChar(20)
+  keyHash   String  @unique @db.VarChar(255)
+  scopes    Json    @db.Json
+
+  expiresAt  DateTime? @db.DateTime(6)
+  lastUsedAt DateTime? @db.DateTime(6)
+  revokedAt  DateTime? @db.DateTime(6)
+  createdAt  DateTime  @default(now()) @db.DateTime(6)
+
+  account LocalAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, revokedAt])
+}
+
+model Connector {
+  id             String @id @default(uuid()) @db.Char(36)
+  name           String @db.VarChar(120)
+  installationId String @unique @db.VarChar(120)
+
+  version      String?         @db.VarChar(50)
+  status       ConnectorStatus @default(PENDING)
+  publicKey    String?         @db.Text
+  tokenHash    String?         @unique @db.VarChar(255)
+  capabilities Json?           @db.Json
+  metadata     Json?           @db.Json
+
+  lastSeenAt DateTime? @db.DateTime(6)
+  revokedAt  DateTime? @db.DateTime(6)
+  createdAt  DateTime  @default(now()) @db.DateTime(6)
+  updatedAt  DateTime  @updatedAt @db.DateTime(6)
+
+  pairings    ConnectorPairing[]
+  dataSources DataSource[]
+
+  @@index([status, lastSeenAt])
+}
+
+model ConnectorPairing {
+  id                 String @id @default(uuid()) @db.Char(36)
+  connectorId        String @db.Char(36)
+  createdByAccountId String? @db.Char(36)
+
+  codeHash   String   @unique @db.VarChar(255)
+  expiresAt  DateTime @db.DateTime(6)
+  consumedAt DateTime? @db.DateTime(6)
+  createdAt  DateTime @default(now()) @db.DateTime(6)
+
+  connector Connector @relation(fields: [connectorId], references: [id], onDelete: Cascade)
+  creator   LocalAccount? @relation("PairingCreator", fields: [createdByAccountId], references: [id], onDelete: SetNull)
+
+  @@index([connectorId, expiresAt])
+}
+
+model DataSource {
+  id          String @id @default(uuid()) @db.Char(36)
+  connectorId String @db.Char(36)
+
+  name          String         @db.VarChar(120)
+  engine        DatabaseEngine @default(MYSQL)
+  databaseName  String         @db.VarChar(255)
+  defaultSchema String?        @db.VarChar(255)
+
+  // Only non-secret connection options. Never store a full connection string,
+  // database username, password, or private key here.
+  connectionOptions Json @db.Json
+
+  // Reference to a credential in the Connector's local secret store.
+  credentialRef String? @db.VarChar(255)
+
+  isReadOnly Boolean          @default(true)
+  status     DataSourceStatus @default(PENDING)
+
+  lastConnectedAt  DateTime? @db.DateTime(6)
+  lastSchemaSyncAt DateTime? @db.DateTime(6)
+  createdAt        DateTime  @default(now()) @db.DateTime(6)
+  updatedAt        DateTime  @updatedAt @db.DateTime(6)
+
+  connector           Connector             @relation(fields: [connectorId], references: [id], onDelete: Restrict)
+  defaultForWorkspaces Workspace[]          @relation("WorkspaceDefaultDataSource")
+  workspaceLinks      WorkspaceDataSource[]
+  schemaSnapshots     SchemaSnapshot[]
+  semanticEntities    SemanticEntity[]
+  semanticMetrics     SemanticMetric[]
+  queryRuns           QueryRun[]
+  actionProposals     ActionProposal[]
+  artifacts           SavedArtifact[]
+
+  @@unique([connectorId, name])
+  @@index([connectorId, status])
+}
+
+model WorkspaceDataSource {
+  workspaceId  String @db.Char(36)
+  dataSourceId String @db.Char(36)
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, dataSourceId])
+  @@index([dataSourceId])
+}
+
+model SchemaSnapshot {
+  id           String @id @default(uuid()) @db.Char(36)
+  dataSourceId String @db.Char(36)
+
+  version    Int
+  schemaHash String  @db.VarChar(128)
+  payload    Json?   @db.Json
+
+  scannedAt DateTime @default(now()) @db.DateTime(6)
+  createdAt DateTime @default(now()) @db.DateTime(6)
+
+  dataSource DataSource      @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  tables     SchemaTable[]
+  relations  SchemaRelation[]
+
+  @@unique([dataSourceId, version])
+  @@index([dataSourceId, scannedAt])
+}
+
+model SchemaTable {
+  id         String @id @default(uuid()) @db.Char(36)
+  snapshotId String @db.Char(36)
+
+  schemaName  String  @db.VarChar(255)
+  tableName   String  @db.VarChar(255)
+  tableType   String  @db.VarChar(50)
+  comment     String? @db.Text
+  rowEstimate BigInt?
+
+  snapshot SchemaSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  columns SchemaColumn[]
+
+  outgoingRelations SchemaRelation[] @relation("SourceTable")
+  incomingRelations SchemaRelation[] @relation("TargetTable")
+
+  @@unique([snapshotId, schemaName, tableName])
+  @@index([snapshotId, tableName])
+}
+
+model SchemaColumn {
+  id      String @id @default(uuid()) @db.Char(36)
+  tableId String @db.Char(36)
+
+  ordinal           Int
+  columnName        String  @db.VarChar(255)
+  dataType          String  @db.VarChar(120)
+  nativeType        String? @db.VarChar(120)
+  isNullable        Boolean @default(true)
+  isPrimaryKey      Boolean @default(false)
+  isUnique          Boolean @default(false)
+  isForeignKey      Boolean @default(false)
+  defaultExpression String? @db.Text
+  comment           String? @db.Text
+
+  maxLength        Int?
+  numericPrecision Int?
+  numericScale     Int?
+
+  table SchemaTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  outgoingRelations SchemaRelation[] @relation("SourceColumn")
+  incomingRelations SchemaRelation[] @relation("TargetColumn")
+
+  @@unique([tableId, columnName])
+  @@index([tableId, ordinal])
+}
+
+model SchemaRelation {
+  id         String @id @default(uuid()) @db.Char(36)
+  snapshotId String @db.Char(36)
+
+  sourceTableId  String @db.Char(36)
+  sourceColumnId String @db.Char(36)
+  targetTableId  String @db.Char(36)
+  targetColumnId String @db.Char(36)
+
+  constraintName String? @db.VarChar(255)
+  relationType   SemanticRelationshipType
+  onDelete       String? @db.VarChar(50)
+
+  snapshot SchemaSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  sourceTable SchemaTable @relation("SourceTable", fields: [sourceTableId], references: [id], onDelete: Cascade)
+  targetTable SchemaTable @relation("TargetTable", fields: [targetTableId], references: [id], onDelete: Cascade)
+
+  sourceColumn SchemaColumn @relation("SourceColumn", fields: [sourceColumnId], references: [id], onDelete: Cascade)
+  targetColumn SchemaColumn @relation("TargetColumn", fields: [targetColumnId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, sourceColumnId, targetColumnId])
+  @@index([snapshotId])
+  @@index([sourceTableId])
+  @@index([targetTableId])
+}
+
+model SemanticEntity {
+  id           String @id @default(uuid()) @db.Char(36)
+  workspaceId  String @db.Char(36)
+  dataSourceId String @db.Char(36)
+
+  entityKey       String  @db.VarChar(120)
+  displayName     String  @db.VarChar(120)
+  description     String? @db.Text
+  tableSchema     String? @db.VarChar(255)
+  tableName       String? @db.VarChar(255)
+  primaryKeyField String? @db.VarChar(255)
+
+  metadata Json? @db.Json
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @updatedAt @db.DateTime(6)
+
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  fields SemanticField[]
+
+  outgoingRelationships SemanticRelationship[] @relation("SemanticRelationshipSource")
+  incomingRelationships SemanticRelationship[] @relation("SemanticRelationshipTarget")
+
+  @@unique([workspaceId, dataSourceId, entityKey])
+  @@index([workspaceId])
+  @@index([dataSourceId])
+}
+
+model SemanticField {
+  id       String @id @default(uuid()) @db.Char(36)
+  entityId String @db.Char(36)
+
+  fieldName   String  @db.VarChar(255)
+  displayName String  @db.VarChar(120)
+  description String? @db.Text
+
+  semanticType String? @db.VarChar(100)
+  synonyms     Json?   @db.Json
+
+  sensitivity SensitivityLevel @default(INTERNAL)
+
+  allowFilter    Boolean @default(true)
+  allowGroup     Boolean @default(true)
+  allowAggregate Boolean @default(true)
+
+  defaultAggregation String? @db.VarChar(50)
+
+  entity SemanticEntity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@unique([entityId, fieldName])
+  @@index([entityId])
+}
+
+model SemanticRelationship {
+  id          String @id @default(uuid()) @db.Char(36)
+  workspaceId String @db.Char(36)
+
+  sourceEntityId String @db.Char(36)
+  targetEntityId String @db.Char(36)
+
+  name        String  @db.VarChar(120)
+  description String? @db.Text
+
+  relationshipType SemanticRelationshipType
+  joinDefinition   Json @db.Json
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @updatedAt @db.DateTime(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  sourceEntity SemanticEntity @relation("SemanticRelationshipSource", fields: [sourceEntityId], references: [id], onDelete: Cascade)
+  targetEntity SemanticEntity @relation("SemanticRelationshipTarget", fields: [targetEntityId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([sourceEntityId])
+  @@index([targetEntityId])
+}
+
+model SemanticMetric {
+  id           String @id @default(uuid()) @db.Char(36)
+  workspaceId  String @db.Char(36)
+  dataSourceId String @db.Char(36)
+
+  name        String  @db.VarChar(120)
+  displayName String  @db.VarChar(120)
+  description String? @db.Text
+
+  // Structured metric definition; never execute as unchecked SQL.
+  definition Json @db.Json
+  format     String? @db.VarChar(50)
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @updatedAt @db.DateTime(6)
+
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, dataSourceId, name])
+}
+
+model Workspace {
+  id   String @id @default(uuid()) @db.Char(36)
+  name String @db.VarChar(120)
+
+  description String? @db.Text
+  icon        String? @db.VarChar(50)
+
+  status WorkspaceStatus @default(ACTIVE)
+
+  createdByAccountId  String  @db.Char(36)
+  defaultDataSourceId String? @db.Char(36)
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @updatedAt @db.DateTime(6)
+
+  createdBy LocalAccount @relation("WorkspaceCreator", fields: [createdByAccountId], references: [id], onDelete: Restrict)
+
+  defaultDataSource DataSource? @relation("WorkspaceDefaultDataSource", fields: [defaultDataSourceId], references: [id], onDelete: SetNull)
+
+  dataSources          WorkspaceDataSource[]
+  conversations        Conversation[]
+  artifacts            SavedArtifact[]
+  semanticEntities     SemanticEntity[]
+  semanticRelationships SemanticRelationship[]
+  semanticMetrics      SemanticMetric[]
+  queryRuns            QueryRun[]
+  actionProposals      ActionProposal[]
+
+  @@index([status, updatedAt])
+}
+
+model Conversation {
+  id          String @id @default(uuid()) @db.Char(36)
+  workspaceId String @db.Char(36)
+
+  title  String? @db.VarChar(255)
+  status ConversationStatus @default(ACTIVE)
+
+  createdByAccountId String @db.Char(36)
+
+  lastMessageAt DateTime? @db.DateTime(6)
+  createdAt     DateTime  @default(now()) @db.DateTime(6)
+  updatedAt     DateTime  @updatedAt @db.DateTime(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy LocalAccount @relation("ConversationCreator", fields: [createdByAccountId], references: [id], onDelete: Restrict)
+
+  messages Message[]
+  agentRuns AgentRun[]
+  queryRuns QueryRun[]
+  actionProposals ActionProposal[]
+
+  @@index([workspaceId, updatedAt])
+}
+
+model Message {
+  id              String @id @default(uuid()) @db.Char(36)
+  conversationId  String @db.Char(36)
+  authorAccountId String? @db.Char(36)
+
+  sequence Int
+  role     MessageRole
+
+  content  String? @db.Text
+  parts    Json?   @db.Json
+  uiSchema Json?   @db.Json
+  metadata Json?   @db.Json
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author LocalAccount? @relation("MessageAuthor", fields: [authorAccountId], references: [id], onDelete: SetNull)
+
+  inputRuns AgentRun[] @relation("RunInputMessage")
+
+  @@unique([conversationId, sequence])
+  @@index([conversationId, createdAt])
+}
+
+model AgentRun {
+  id             String @id @default(uuid()) @db.Char(36)
+  conversationId String @db.Char(36)
+  inputMessageId String? @db.Char(36)
+
+  status AgentRunStatus @default(QUEUED)
+
+  provider String? @db.VarChar(100)
+  model    String? @db.VarChar(150)
+
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+
+  startedAt   DateTime? @db.DateTime(6)
+  completedAt DateTime? @db.DateTime(6)
+
+  errorCode    String? @db.VarChar(100)
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  inputMessage Message? @relation("RunInputMessage", fields: [inputMessageId], references: [id], onDelete: SetNull)
+
+  steps AgentStep[]
+  events AgentRunEvent[]
+  queryRuns QueryRun[]
+  actionProposals ActionProposal[]
+  mcpInvocations McpInvocation[]
+
+  @@index([conversationId, status, createdAt])
+}
+
+model AgentStep {
+  id         String @id @default(uuid()) @db.Char(36)
+  agentRunId String @db.Char(36)
+
+  sequence Int
+  stepType AgentStepType
+  status   AgentStepStatus @default(PENDING)
+
+  inputSummary  Json? @db.Json
+  outputSummary Json? @db.Json
+
+  errorCode    String? @db.VarChar(100)
+  errorMessage String? @db.Text
+
+  startedAt   DateTime? @db.DateTime(6)
+  completedAt DateTime? @db.DateTime(6)
+
+  agentRun AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  @@unique([agentRunId, sequence])
+  @@index([agentRunId, status])
+}
+
+model AgentRunEvent {
+  id         String @id @default(uuid()) @db.Char(36)
+  agentRunId String @db.Char(36)
+
+  sequence  Int
+  eventType String @db.VarChar(100)
+  payload   Json   @db.Json
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+
+  agentRun AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  @@unique([agentRunId, sequence])
+  @@index([agentRunId, createdAt])
+}
+
+model QueryRun {
+  id           String @id @default(uuid()) @db.Char(36)
+  workspaceId  String @db.Char(36)
+  dataSourceId String @db.Char(36)
+
+  conversationId       String? @db.Char(36)
+  agentRunId           String? @db.Char(36)
+  requestedByAccountId String? @db.Char(36)
+
+  origin ExecutionOrigin @default(WEB)
+  status QueryRunStatus  @default(QUEUED)
+
+  sqlText          String @db.Text
+  normalizedSqlHash String @db.VarChar(128)
+
+  // Store parameter metadata/redacted summaries, not sensitive raw values.
+  parameterSummary Json? @db.Json
+
+  rowCount   Int?
+  durationMs Int?
+
+  errorCode    String? @db.VarChar(100)
+  errorMessage String? @db.Text
+
+  startedAt   DateTime? @db.DateTime(6)
+  completedAt DateTime? @db.DateTime(6)
+  createdAt   DateTime  @default(now()) @db.DateTime(6)
+
+  workspace  Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Restrict)
+
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  agentRun     AgentRun?     @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+  requestedBy LocalAccount? @relation("QueryRequester", fields: [requestedByAccountId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([dataSourceId, status])
+  @@index([agentRunId])
+}
+
+model ActionProposal {
+  id           String @id @default(uuid()) @db.Char(36)
+  workspaceId  String @db.Char(36)
+  dataSourceId String @db.Char(36)
+
+  conversationId String? @db.Char(36)
+  agentRunId     String? @db.Char(36)
+
+  proposedByAccountId  String @db.Char(36)
+  confirmedByAccountId String? @db.Char(36)
+
+  actionType ActionType
+  title       String  @db.VarChar(255)
+  description String? @db.Text
+
+  plan Json @db.Json
+
+  sqlPreview       String? @db.Text
+  parameterSummary Json?   @db.Json
+  impactSummary    Json?   @db.Json
+
+  contentHash String @db.VarChar(128)
+  status      ActionProposalStatus @default(DRAFT)
+
+  expiresAt   DateTime? @db.DateTime(6)
+  confirmedAt DateTime? @db.DateTime(6)
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @updatedAt @db.DateTime(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource DataSource @relation(fields: [dataSourceId], references: [id], onDelete: Restrict)
+
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  agentRun AgentRun? @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+
+  proposer LocalAccount @relation("ActionProposer", fields: [proposedByAccountId], references: [id], onDelete: Restrict)
+  confirmer LocalAccount? @relation("ActionConfirmer", fields: [confirmedByAccountId], references: [id], onDelete: SetNull)
+
+  execution ActionExecution?
+
+  @@index([workspaceId, createdAt])
+  @@index([dataSourceId, status])
+  @@index([expiresAt])
+}
+
+model ActionExecution {
+  id         String @id @default(uuid()) @db.Char(36)
+  proposalId String @unique @db.Char(36)
+
+  executedByAccountId String? @db.Char(36)
+  idempotencyKey      String @unique @db.VarChar(255)
+
+  status ActionExecutionStatus @default(QUEUED)
+
+  affectedRows  BigInt?
+  resultSummary Json? @db.Json
+
+  errorCode    String? @db.VarChar(100)
+  errorMessage String? @db.Text
+
+  startedAt   DateTime? @db.DateTime(6)
+  completedAt DateTime? @db.DateTime(6)
+  createdAt   DateTime  @default(now()) @db.DateTime(6)
+
+  proposal ActionProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  executor LocalAccount? @relation("ActionExecutor", fields: [executedByAccountId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+}
+
+model SavedArtifact {
+  id          String @id @default(uuid()) @db.Char(36)
+  workspaceId String @db.Char(36)
+  dataSourceId String? @db.Char(36)
+  createdByAccountId String @db.Char(36)
+
+  type        ArtifactType
+  name        String  @db.VarChar(180)
+  description String? @db.Text
+
+  // Saved query, visualization, or analysis definition.
+  // Do not persist full raw query results by default.
+  spec Json @db.Json
+
+  isPinned Boolean @default(false)
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @updatedAt @db.DateTime(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dataSource DataSource? @relation(fields: [dataSourceId], references: [id], onDelete: SetNull)
+  creator LocalAccount @relation("ArtifactCreator", fields: [createdByAccountId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, type])
+  @@index([workspaceId, isPinned])
+}
+
+model ExternalMcpServer {
+  id   String @id @default(uuid()) @db.Char(36)
+  name String @db.VarChar(120)
+
+  transport McpTransport
+
+  endpointUrl       String? @db.Text
+  command           String? @db.Text
+  args              Json?   @db.Json
+  workingDirectory String? @db.Text
+
+  // Reference to local secret storage; never store tokens/passwords here.
+  credentialRef String? @db.VarChar(255)
+
+  config Json? @db.Json
+
+  enabled Boolean @default(true)
+
+  lastConnectedAt DateTime? @db.DateTime(6)
+  lastError        String?   @db.Text
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+  updatedAt DateTime @updatedAt @db.DateTime(6)
+
+  tools       ExternalMcpTool[]
+  invocations McpInvocation[]
+
+  @@index([enabled, transport])
+}
+
+model ExternalMcpTool {
+  id       String @id @default(uuid()) @db.Char(36)
+  serverId String @db.Char(36)
+
+  name        String  @db.VarChar(180)
+  description String? @db.Text
+
+  inputSchema Json  @db.Json
+  annotations Json? @db.Json
+
+  enabled Boolean @default(true)
+
+  discoveredAt DateTime @default(now()) @db.DateTime(6)
+
+  server ExternalMcpServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([serverId, name])
+}
+
+model McpInvocation {
+  id String @id @default(uuid()) @db.Char(36)
+
+  serverId   String? @db.Char(36)
+  agentRunId String? @db.Char(36)
+
+  direction McpInvocationDirection
+  toolName  String @db.VarChar(180)
+
+  status McpInvocationStatus @default(RUNNING)
+
+  requestSummary Json? @db.Json
+  resultSummary  Json? @db.Json
+
+  durationMs Int?
+
+  errorCode    String? @db.VarChar(100)
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+
+  server ExternalMcpServer? @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  agentRun AgentRun? @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+
+  @@index([serverId, createdAt])
+  @@index([agentRunId])
+}
+
+model InstanceSetting {
+  key   String @id @db.VarChar(150)
+  value Json   @db.Json
+
+  updatedAt DateTime @updatedAt @db.DateTime(6)
+}
+
+model AuditLog {
+  id String @id @default(uuid()) @db.Char(36)
+
+  actorType AuditActorType
+  actorId   String? @db.VarChar(120)
+
+  action       String  @db.VarChar(150)
+  resourceType String  @db.VarChar(100)
+  resourceId   String? @db.VarChar(120)
+
+  requestId String? @db.VarChar(120)
+
+  metadata Json? @db.Json
+
+  createdAt DateTime @default(now()) @db.DateTime(6)
+
+  @@index([actorType, actorId, createdAt])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+}
+
+

@@ -1,0 +1,37 @@
+{
+  "note": "Public deterministic test vector; never a deployed key.",
+  "now": 2000000001,
+  "publicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+  "fields": [
+    "connector-mutation-v1",
+    "task",
+    "preview",
+    "11111111-1111-4111-8111-111111111111",
+    "22222222-2222-4222-8222-222222222222",
+    "33333333-3333-4333-8333-333333333333",
+    "44444444-4444-4444-8444-444444444444",
+    "55555555-5555-4555-8555-555555555555",
+    "9981d14b6085e0ef9c3edd8e9161b8dc8677cb9e2e3385710648bfad2ba682fd",
+    "2000000000",
+    "2000000030",
+    "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+    "",
+    "1"
+  ],
+  "message": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "connectorId": "22222222-2222-4222-8222-222222222222",
+    "ownerId": "33333333-3333-4333-8333-333333333333",
+    "workspaceId": "44444444-4444-4444-8444-444444444444",
+    "sourceId": "55555555-5555-4555-8555-555555555555",
+    "kind": "task",
+    "operation": "preview",
+    "payload": "eyJhcGlCb290IjoiMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsInBsYW4iOnsib3BlcmF0aW9uIjoiaW5zZXJ0IiwidGFibGUiOiLlrqLmiLciLCJyb3dzIjpbW3siY29sdW1uIjoiaWQiLCJ2YWx1ZSI6eyJraW5kIjoiaW50ZWdlciIsInZhbHVlIjoiMTg0NDY3NDQwNzM3MDk1NTE2MTUifX1dXX19",
+    "issuedAt": 2000000000,
+    "expiresAt": 2000000030,
+    "nonce": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+    "replyTo": "",
+    "protocol": 1,
+    "signature": "9GJsUc9XaKNe2UfUUo3fvNN6FT41bsl0XOZLnZloOTCl6I535eBVsM2498iHDD2Gw98S3frT2Fz-BeNauZjoBQ"
+  }
+}

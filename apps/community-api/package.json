@@ -1,0 +1,42 @@
+{
+  "name": "@workspace/community-api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run build && node --test --test-concurrency=1 dist/test/*.test.js",
+    "admin:create": "node dist/src/create-admin.js",
+    "db:migrate": "pnpm run build && node dist/src/migrations.js",
+    "db:migrate:stage3": "pnpm run build && node dist/src/migrations.js --stage3",
+    "db:migrate:stage6": "pnpm run build && node dist/src/migrations.js --stage6",
+    "db:migrate:stage7": "pnpm run build && node dist/src/migrations.js --stage7",
+    "db:migrate:stage8": "pnpm run build && node dist/src/migrations.js --stage8",
+    "admin:reset-password": "node dist/src/reset-admin.js"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "3.0.76",
+    "@napi-rs/keyring": "2.1.2",
+    "@nestjs/common": "11.2.6",
+    "@nestjs/core": "11.2.6",
+    "@nestjs/platform-express": "11.2.6",
+    "ai": "7.0.149",
+    "better-auth": "1.7.14",
+    "express": "5.1.0",
+    "mysql2": "3.15.3",
+    "pino": "10.4.0",
+    "reflect-metadata": "0.2.2",
+    "rotating-file-stream": "3.2.10",
+    "rxjs": "7.8.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.5",
+    "@types/node": "24.0.0",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  },
+  "type": "module"
+}
