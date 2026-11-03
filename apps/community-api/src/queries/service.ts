@@ -1,7 +1,11 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { diagnostics } from "../logging/public.js";
 import { ConnectorError, type QueryConnector } from "../connectors/public.js";
-import { ScopeCoordinator, type ScopeSourceLookup } from "../datasources/public.js";
+import {
+  DataSourceError,
+  ScopeCoordinator,
+  type ScopeSourceLookup,
+} from "../datasources/public.js";
 import { ReadJobs } from "./jobs.js";
 import type { ExecutionState, ExecutionSummary, QueryJournal } from "./journal.js";
 import type { ReadResult, ReadTask } from "../protocol/read-task.js";
@@ -9,6 +13,9 @@ import type { SessionAccess } from "../auth/public.js";
 
 type Scope = { ownerId: string; connectorId: string; workspaceId: string; sourceId: string };
 type CancelTask = Omit<ReadTask, "payload" | "operation"> & { operation: "cancel_read" };
+type ExecutionLease = <T>(
+  action: (assertActive: () => void, signal: AbortSignal, sessionId: string) => Promise<T>,
+) => Promise<T>;
 
 /** In-memory orchestration for explicitly enabled read-only queries. */
 export class ReadService {
@@ -34,16 +41,12 @@ export class ReadService {
     string,
     {
       check: () => Promise<boolean>;
-      run: <T>(action: (assertActive: () => void, signal: AbortSignal) => Promise<T>) => Promise<T>;
+      run: ExecutionLease;
     }
   >();
   /** External delegations retain their own current authorization check, in
    * addition to the real browser session attached to each approved task. */
-  guardExecution(
-    id: string,
-    check: () => Promise<boolean>,
-    run: <T>(action: (assertActive: () => void, signal: AbortSignal) => Promise<T>) => Promise<T>,
-  ): void {
+  guardExecution(id: string, check: () => Promise<boolean>, run: ExecutionLease): void {
     if (this.executionGuards.has(id) || this.executionGuards.size >= 128)
       throw new Error("CAPACITY");
     this.executionGuards.set(id, { check, run });
@@ -402,10 +405,22 @@ export class ReadService {
         this.jobs.reject(scope, work.task.id, work.task.nonce);
         return null;
       }
-      const dispatch = async (assertActive: () => void = () => {}, signal?: AbortSignal) => {
-        const signed = await this.registry.issueReadTask(work.task);
-        await this.flushHistory();
-        if (!(await this.sessionActive(scope, work.task.id, work.task.nonce, false))) {
+      // Acquire the Connector lock before the MCP guard's database binding lock.
+      // The signed envelope stays local until the final guarded publication.
+      const signed = await this.registry.issueReadTask(work.task);
+      await this.flushHistory();
+      const dispatch = async (
+        assertActive: () => void = () => {},
+        signal?: AbortSignal,
+        leasedSession?: string,
+      ) => {
+        const identity = this.jobs.sessionIdentity(scope, work.task.id);
+        const active = leasedSession
+          ? !this.closed &&
+            identity?.sessionId === leasedSession &&
+            identity.taskNonce === work.task.nonce
+          : await this.sessionActive(scope, work.task.id, work.task.nonce, false);
+        if (!active) {
           this.jobs.reject(scope, work.task.id, work.task.nonce);
           return null;
         }
@@ -421,7 +436,13 @@ export class ReadService {
         return signed;
       };
       const guard = this.executionGuards.get(work.task.id);
-      return guard ? guard.run(dispatch) : dispatch();
+      try {
+        return await (guard ? guard.run(dispatch) : dispatch());
+      } catch (error) {
+        if (!(error instanceof DataSourceError) || error.code !== "NOT_FOUND") throw error;
+        this.jobs.reject(scope, work.task.id, work.task.nonce);
+        return null;
+      }
     });
   }
 

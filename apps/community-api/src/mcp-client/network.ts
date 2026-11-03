@@ -6,7 +6,7 @@ import { networkInterfaces } from "node:os";
 import { createParser } from "eventsource-parser";
 import { publicModelAddress } from "../ai/public.js";
 import { decodeJson } from "./limits.js";
-import { ExternalMcpError } from "./model.js";
+import { ExternalMcpError, safeUrl } from "./model.js";
 export type Address = { address: string; family: number };
 export type NetworkPolicy = {
   destinations: string[];
@@ -15,23 +15,6 @@ export type NetworkPolicy = {
   controlPorts: number[];
   credentialDestinations: string[];
 };
-export function safeUrl(raw: string) {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new ExternalMcpError("EXTERNAL_MCP_URL_REJECTED");
-  }
-  if (
-    raw.length > 2048 ||
-    url.username ||
-    url.password ||
-    url.hash ||
-    !["http:", "https:"].includes(url.protocol)
-  )
-    throw new ExternalMcpError("EXTERNAL_MCP_URL_REJECTED");
-  return url;
-}
 function eligiblePrivate(ip: string) {
   if (ip === "::1") return true;
   if (isIP(ip) !== 4) return false;
@@ -43,7 +26,7 @@ function eligiblePrivate(ip: string) {
     (a === 172 && b !== undefined && b >= 16 && b <= 31)
   );
 }
-function loopback(ip: string) {
+export function loopbackAddress(ip: string) {
   return ip === "::1" || (isIP(ip) === 4 && ip.startsWith("127."));
 }
 export function validateDestination(raw: string, policy: NetworkPolicy, addresses: Address[]) {
@@ -57,13 +40,16 @@ export function validateDestination(raw: string, policy: NetworkPolicy, addresse
     throw new ExternalMcpError("EXTERNAL_MCP_ADDRESS_REJECTED", 403);
   const approval = policy.privateApprovals.find((a) => a.origin === url.origin),
     privateMode = !!approval;
-  if (url.protocol === "http:" && !privateMode)
+  if (
+    url.protocol === "http:" &&
+    (!privateMode || addresses.some((a) => !loopbackAddress(a.address)))
+  )
     throw new ExternalMcpError("EXTERNAL_MCP_HTTPS_REQUIRED", 403);
   for (const a of addresses) {
     if (
       !isIP(a.address) ||
       isIP(a.address) !== a.family ||
-      ((loopback(a.address) || local.has(a.address)) &&
+      ((loopbackAddress(a.address) || local.has(a.address)) &&
         policy.controlPorts.includes(Number(url.port || (url.protocol === "https:" ? 443 : 80))))
     )
       throw new ExternalMcpError("EXTERNAL_MCP_CONTROL_PLANE_REJECTED", 403);

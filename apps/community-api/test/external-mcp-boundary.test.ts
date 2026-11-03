@@ -9,6 +9,7 @@ import { test } from "node:test";
 import { promisify } from "node:util";
 import { generate } from "selfsigned";
 import { decodeJson } from "../src/mcp-client/limits.js";
+import { safeUrl } from "../src/mcp-client/model.js";
 import {
   abortableAddresses,
   clientFetch,
@@ -28,6 +29,24 @@ const policy = (url: string): NetworkPolicy => ({
   privateApprovals: [{ origin: new URL(url).origin, addresses: ["127.0.0.1"] }],
   blockedOrigins: [],
   controlPorts: [],
+});
+test("external MCP rejects query-bearing endpoints and requires TLS outside loopback", () => {
+  for (const raw of ["https://example.test/mcp?api_key=synthetic", "https://example.test/mcp?"])
+    assert.throws(() => safeUrl(raw), /URL_REJECTED/);
+  for (const scheme of ["http", "https"]) {
+    const raw = `${scheme}://10.1.2.3/mcp`;
+    const check = () =>
+      validateDestination(
+        raw,
+        {
+          ...policy(raw),
+          privateApprovals: [{ origin: new URL(raw).origin, addresses: ["10.1.2.3"] }],
+        },
+        [{ address: "10.1.2.3", family: 4 }],
+      );
+    if (scheme === "http") assert.throws(check, /HTTPS_REQUIRED/);
+    else assert.equal(check().href, raw);
+  }
 });
 test("G4 waiting for DNS is bounded even when the underlying lookup remains outstanding", async () => {
   const abort = new AbortController(),

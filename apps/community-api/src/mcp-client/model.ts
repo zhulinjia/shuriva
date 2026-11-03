@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { z } from "zod";
 
 export class ExternalMcpError extends Error {
@@ -9,7 +10,27 @@ export class ExternalMcpError extends Error {
   }
 }
 export const uuid = z.string().uuid();
-const url = z.string().min(1).max(2048);
+function endpoint(value: string) {
+  try {
+    const parsed = new URL(value);
+    if (
+      value.length <= 2048 &&
+      ["https:", "http:"].includes(parsed.protocol) &&
+      !parsed.username &&
+      !parsed.password &&
+      !/[?#]/.test(parsed.href)
+    )
+      return parsed;
+  } catch {
+    // Malformed URLs are rejected at every configuration and transport boundary.
+  }
+}
+export function safeUrl(value: string) {
+  const parsed = endpoint(value);
+  if (!parsed) throw new ExternalMcpError("EXTERNAL_MCP_URL_REJECTED");
+  return parsed;
+}
+const url = z.string().refine((value) => !!endpoint(value));
 const oauth = z.strictObject({
   issuer: url,
   resourceMetadataUrl: url,
@@ -28,8 +49,11 @@ const http = z
     privateApprovals: z
       .array(
         z.strictObject({
-          origin: url,
-          addresses: z.array(z.string().min(1).max(64)).min(1).max(16),
+          origin: z.string().refine((value) => endpoint(value)?.origin === value),
+          addresses: z
+            .array(z.string().refine((value) => isIP(value) !== 0))
+            .min(1)
+            .max(16),
         }),
       )
       .max(8),
@@ -119,6 +143,10 @@ export type Connection = {
   approvedTools: Array<{ name: string; hash: string; sessionId: string }>;
   installationHash: string | null;
 };
+export type ConnectionReference = Pick<
+  Connection,
+  "id" | "ownerId" | "workspaceId" | "name" | "disabled" | "version" | "credentialRef"
+>;
 export const callStates = [
   "pending_approval",
   "running",

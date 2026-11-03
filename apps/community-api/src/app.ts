@@ -124,6 +124,7 @@ export async function createApp(
             c.release();
           }
         }
+        if (options.mcpConfig && !bindingIdentities) throw Error("MCP_BINDING_UNVERIFIED");
       } catch (error) {
         await pool.end();
         await app.close();

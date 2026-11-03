@@ -32,6 +32,7 @@ const events = new Set([
   "migration.failed",
   "product.request_failed",
   "datasource.request_failed",
+  "datasource.connection_reset_failed",
   "semantic.request_failed",
   "history.request_failed",
   "audit.persistence_unavailable",

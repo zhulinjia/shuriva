@@ -216,14 +216,18 @@ export function mountMcpManagement(
       const client = await r.store.client(who.ownerId, input.clientId);
       if (client?.mode === "local_domain" && !input.scopes.includes("metadata:read"))
         throw new McpError("MCP_LOCAL_METADATA_REQUIRED", 400);
-      const id = await r.coordinator.withScope({ ownerId: who.ownerId, ...input }, (binding) =>
-        r.store.createGrant(
-          who.ownerId,
-          who.sessionId,
-          input,
-          binding.connectorId,
-          r.oauth.resource,
-        ),
+      const id = await r.coordinator.withBoundIdentity(
+        { ownerId: who.ownerId, ...input },
+        (binding, _signal, connection) =>
+          r.store.createGrant(
+            connection,
+            who.ownerId,
+            who.sessionId,
+            input,
+            binding.connectorId,
+            binding.bindingGeneration,
+            r.oauth.resource,
+          ),
       );
       res.status(201).json({ id });
     }),

@@ -1,3 +1,4 @@
+import type { PoolConnection } from "mysql2/promise";
 import { DataSourceError } from "./errors.js";
 
 type Scope = { ownerId: string; workspaceId: string; sourceId: string };
@@ -12,7 +13,11 @@ export type ScopeSourceLookup = {
     owner: string,
     workspace: string,
     source: string,
-    action: (binding: { connectorId: string; bindingGeneration: string }) => Promise<T>,
+    action: (
+      binding: { connectorId: string; bindingGeneration: string },
+      signal: AbortSignal,
+      connection: PoolConnection,
+    ) => Promise<T>,
   ): Promise<T>;
 };
 type ConnectorAuthorization = {
@@ -72,23 +77,39 @@ export class ScopeCoordinator {
    * Connector requests use withScope and never hold these locks over their I/O. */
   async withBoundIdentity<T>(
     scope: Scope,
-    operation: (binding: Binding & { bindingGeneration: string }) => Promise<T>,
+    operation: (
+      binding: Binding & { bindingGeneration: string },
+      signal: AbortSignal,
+      connection: PoolConnection,
+    ) => Promise<T>,
   ): Promise<T> {
     return this.withScope(scope, async (observed) => {
-      if (!this.sources.withBoundIdentity) throw new DataSourceError("NOT_FOUND");
-      return this.sources.withBoundIdentity(
-        scope.ownerId,
-        scope.workspaceId,
-        scope.sourceId,
-        async (current) => {
-          if (
-            observed.connectorId !== current.connectorId ||
-            observed.bindingGeneration !== current.bindingGeneration
-          )
-            throw new DataSourceError("NOT_FOUND");
-          return operation({ ...scope, ...current });
-        },
-      );
+      return this.withStoredBinding(observed, operation);
     });
+  }
+
+  /** Use from a caller that already holds the in-process workspace gate. */
+  async withStoredBinding<T>(
+    expected: Binding,
+    operation: (
+      binding: Binding & { bindingGeneration: string },
+      signal: AbortSignal,
+      connection: PoolConnection,
+    ) => Promise<T>,
+  ): Promise<T> {
+    if (!this.sources.withBoundIdentity) throw new DataSourceError("NOT_FOUND");
+    return this.sources.withBoundIdentity(
+      expected.ownerId,
+      expected.workspaceId,
+      expected.sourceId,
+      async (current, signal, connection) => {
+        if (
+          expected.connectorId !== current.connectorId ||
+          expected.bindingGeneration !== current.bindingGeneration
+        )
+          throw new DataSourceError("NOT_FOUND");
+        return operation({ ...expected, ...current }, signal, connection);
+      },
+    );
   }
 }

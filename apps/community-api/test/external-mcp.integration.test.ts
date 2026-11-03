@@ -1,9 +1,50 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
+import type { RowDataPacket } from "mysql2/promise";
 import { externalFixture } from "./external-mcp-fixture.js";
 import type { ExternalMcpService } from "../src/mcp-client/service.js";
 const enabled = process.env.STAGE9_G4_TEST === "1";
+test("unsafe stored endpoints stay hidden and can be explicitly removed without execution", {
+  skip: !enabled,
+  timeout: 60000,
+}, async (t) => {
+  const f = await externalFixture();
+  t.after(() => f.close());
+  const unsafe = { ...f.httpConfig, resource: `${f.resource}?api_key=synthetic-canary` };
+  assert.equal((await f.request(f.base, { name: "New unsafe", config: unsafe })).status, 400);
+  const { id } = await f.service.create(f.identity, {
+    workspaceId: f.binding.workspaceId,
+    name: "Stored unsafe",
+    config: f.httpConfig,
+  });
+  const { credentialRef } = await f.service.connection(f.identity, f.binding.workspaceId, id);
+  assert.ok(f.hasCredential(credentialRef));
+  await f.pool.execute("UPDATE external_mcp_connection SET config=? WHERE id=?", [
+    JSON.stringify(unsafe),
+    id,
+  ]);
+  const listing = await f.request(f.base);
+  assert.equal(listing.status, 200);
+  const data = await listing.text();
+  assert.match(data, /"cleanupRequired":true/);
+  assert.doesNotMatch(data, /synthetic-canary/);
+  assert.equal((await f.request(`${f.base}/${id}/discover`, {})).status, 409);
+  assert.equal(f.stats().calls, 0);
+  assert.equal((await f.request(`${f.base}/${id}/disable`, {})).status, 200);
+  const [[stored]] = await f.pool.execute<RowDataPacket[]>(
+    "SELECT config,disabled FROM external_mcp_connection WHERE id=?",
+    [id],
+  );
+  assert.equal(stored?.config, "null");
+  assert.equal(stored?.disabled, 1);
+  const after = await f.request(f.base);
+  assert.equal(after.status, 200);
+  assert.match(await after.text(), /"cleanupRequired":false/);
+  for (let attempt = 0; attempt < 100 && f.hasCredential(credentialRef); attempt++)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(f.hasCredential(credentialRef), false);
+});
 test("revocation uses a live owner and session without relying on historical snapshot", {
   skip: !enabled,
   timeout: 60000,

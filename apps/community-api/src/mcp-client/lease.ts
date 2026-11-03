@@ -2,7 +2,12 @@ import { performance } from "node:perf_hooks";
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
 import { authSessionReferenceDeadline, type SessionIdentity } from "../auth/public.js";
 import { workspaceReferenceActive } from "../workspaces.js";
-import { approvalsSchema, type Connection, ExternalMcpError } from "./model.js";
+import {
+  approvalsSchema,
+  type Connection,
+  type ConnectionReference,
+  ExternalMcpError,
+} from "./model.js";
 import type { RuntimeOwnership } from "./ownership.js";
 
 type ToolProof = { name: string; hash: string; sessionId: string };
@@ -30,11 +35,11 @@ export class ExternalLease {
   ) {
     return this.observe(conn, who, action, tool, otherSessions, true);
   }
-  metadata(conn: Connection, who: SessionIdentity) {
+  metadata(conn: ConnectionReference, who: SessionIdentity) {
     return this.observe(conn, who, async (check) => check(), undefined, [], false);
   }
   private async observe<T>(
-    conn: Connection,
+    conn: ConnectionReference,
     who: SessionIdentity,
     action: (check: () => void, signal: AbortSignal, remainingMs: () => number) => Promise<T>,
     tool: ToolProof | undefined,
@@ -85,7 +90,7 @@ export class ExternalLease {
           throw new ExternalMcpError("EXTERNAL_MCP_EXECUTION_HOST_CHANGED", 409);
         if (
           !row ||
-          row.disabled ||
+          (requireHost && row.disabled) ||
           row.workspaceId !== conn.workspaceId ||
           Number(row.version) !== conn.version ||
           row.credentialRef !== conn.credentialRef ||

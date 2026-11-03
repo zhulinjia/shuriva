@@ -18,10 +18,11 @@ import {
   type AvailableTool,
   type Connection,
   ExternalMcpError,
+  safeUrl,
   type ToolSnapshot,
 } from "./model.js";
 import { Discovery, ToolRevision } from "./discovery.js";
-import { type Address, clientFetch, type NetworkPolicy, safeUrl } from "./network.js";
+import { type Address, clientFetch, type NetworkPolicy } from "./network.js";
 import type { ProgramCatalog } from "./programs.js";
 import { ownedStdio } from "./stdio.js";
 import { digest, schemaValidator, validateSchema } from "./tool-policy.js";

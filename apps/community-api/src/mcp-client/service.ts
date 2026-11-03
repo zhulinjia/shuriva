@@ -9,12 +9,19 @@ import type { ExternalLease } from "./lease.js";
 import {
   type ClientAudit,
   type Connection,
+  type ConnectionReference,
   type Credentials,
   connectionInput,
   credentialsInput,
   ExternalMcpError,
+  safeUrl,
 } from "./model.js";
-import { abortableAddresses, clientFetch, safeUrl, validateDestination } from "./network.js";
+import {
+  abortableAddresses,
+  clientFetch,
+  loopbackAddress,
+  validateDestination,
+} from "./network.js";
 import { ExternalOAuth } from "./oauth.js";
 import { ProgramCatalog } from "./programs.js";
 import { RateBudget, takeRate } from "./rate.js";
@@ -90,7 +97,11 @@ export class ExternalMcpService {
         if (c.config.kind !== "http" || !c.config.oauth) this.fail("EXTERNAL_MCP_OAUTH_CONFIG");
         const p = networkPolicy(c, config, true),
           url = c.config.oauth.authorizationEndpoint;
-        const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+        const endpoint = safeUrl(url);
+        const host = endpoint.hostname.replace(/^\[|\]$/g, "");
+        // Browser redirects cannot pin the platform's DNS resolution.
+        if (endpoint.protocol === "http:" && host !== "localhost" && !loopbackAddress(host))
+          this.fail("EXTERNAL_MCP_HTTPS_REQUIRED", 403);
         validateDestination(
           url,
           { ...p, destinations: [url] },
@@ -138,7 +149,7 @@ export class ExternalMcpService {
   }
   async managementConnection(who: SessionIdentity, workspace: string, id: string) {
     this.check();
-    const c = await this.store.connection(who.ownerId, id);
+    const c = await this.store.connectionReference(who.ownerId, id);
     if (c.workspaceId !== workspace) this.fail("EXTERNAL_MCP_NOT_FOUND", 404);
     await this.lease.metadata(c, who);
     return c;
@@ -166,10 +177,6 @@ export class ExternalMcpService {
       ];
       if (urls.some((u) => safeUrl(u).href !== u))
         this.fail("EXTERNAL_MCP_URL_CANONICAL_REQUIRED", 400);
-      if (v.config.oauth && safeUrl(v.config.oauth.issuer).search)
-        this.fail("EXTERNAL_MCP_OAUTH_CONFIG", 400);
-      if (v.config.oauth && new URL(v.config.oauth.authorizationEndpoint).search)
-        this.fail("EXTERNAL_MCP_OAUTH_CONFIG", 400);
     } else await this.catalog.inspect(v.config.programId);
     const id = randomUUID();
     await this.audit(who.ownerId, "connection_save_requested", v.workspaceId, id);
@@ -234,7 +241,18 @@ export class ExternalMcpService {
     this.check();
     if (!(await this.workspaces.active(who.ownerId, workspace)))
       this.fail("EXTERNAL_MCP_WORKSPACE_REJECTED", 403);
-    return (await this.store.list(who.ownerId, workspace)).map((c) => this.summary(c, who));
+    return (await this.store.list(who.ownerId, workspace)).map((c) =>
+      c.config === null
+        ? {
+            id: c.id,
+            workspaceId: c.workspaceId,
+            name: c.name,
+            disabled: c.disabled,
+            config: null,
+            cleanupRequired: c.cleanupRequired,
+          }
+        : this.summary(c, who),
+    );
   }
   async credentials(c: Connection, who: SessionIdentity, input: unknown) {
     const value = credentialsInput.parse(input);
@@ -321,9 +339,9 @@ export class ExternalMcpService {
     void this.disconnect(id);
     this.invocations.invalidate(id);
   }
-  async disable(c: Connection, who: SessionIdentity) {
+  async disable(c: ConnectionReference, who: SessionIdentity) {
     await this.audit(who.ownerId, "connection_disable_requested", c.workspaceId, c.id);
-    await this.store.disable(who.ownerId, c.id);
+    await this.store.disable(c, who);
     this.invalidate(c.id);
     await this.cleanupCredentials();
   }

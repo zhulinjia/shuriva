@@ -212,7 +212,8 @@ test("G4 credential rotation is versioned, write-only, and durable cleanup never
   ]);
   await assert.rejects(f.service.connection(f.identity, f.binding.workspaceId, id), /HOST_CHANGED/);
   const view = await f.service.list(f.identity, f.binding.workspaceId);
-  assert.equal(view[0]?.executionHostChanged, true);
+  assert.ok(view[0]?.config);
+  assert.equal(view[0].executionHostChanged, true);
   await f.service.disable(
     await f.service.managementConnection(f.identity, f.binding.workspaceId, id),
     f.identity,

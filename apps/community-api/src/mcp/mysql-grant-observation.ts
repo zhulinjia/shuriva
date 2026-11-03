@@ -89,7 +89,7 @@ export function mysqlMcpGrantObservation(
           await connection.beginTransaction();
           checkDeadline();
           const [rows] = await connection.execute<GrantRow[]>(
-            "SELECT g.id,g.ownerId,g.clientId,g.approvalSessionId,g.resource,g.generation,g.expiresAt,g.revokedAt,t.issuedGeneration FROM mcp_grant g JOIN mcp_grant_token t ON t.grantId=g.id WHERE t.tokenHash=? FOR SHARE",
+            "SELECT g.id,g.ownerId,g.clientId,g.approvalSessionId,g.resource,g.generation,g.expiresAt,g.revokedAt,t.issuedGeneration FROM mcp_grant g JOIN mcp_grant_token t ON t.grantId=g.id WHERE t.tokenHash=? AND g.bindingGeneration IS NOT NULL FOR SHARE",
             [tokenHash],
           );
           checkDeadline();

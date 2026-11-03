@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, observe, post } from "./api";
 import { ConnectionDetails } from "./ConnectionDetails";
 import { ConnectionEditor } from "./ConnectionEditor";
-import { base, type ExternalConnection, type Program } from "./types";
+import { base, type BlockedConnection, type ExternalConnection, type Program } from "./types";
 import "./external-mcp.css";
 
 type Workspace = { id: string; name: string };
@@ -15,7 +15,8 @@ export function ExternalMcpManager({ onBack }: { onBack: () => void }) {
     [workspaces, setWorkspaces] = useState<Workspace[]>([]),
     [workspace, setWorkspace] = useState(""),
     [programs, setPrograms] = useState<Program[]>([]),
-    [connections, setConnections] = useState<ExternalConnection[]>([]),
+    [connections, setConnections] = useState<Array<ExternalConnection | BlockedConnection>>([]),
+    [cleaning, setCleaning] = useState(false),
     [selected, setSelected] = useState(""),
     [error, setError] = useState(""),
     [loading, setLoading] = useState(false),
@@ -83,7 +84,7 @@ export function ExternalMcpManager({ onBack }: { onBack: () => void }) {
       const current = ++generation.current;
       if (!background) setLoading(true);
       try {
-        const value = await observe<{ connections: ExternalConnection[] }>(
+        const value = await observe<{ connections: Array<ExternalConnection | BlockedConnection> }>(
           base(workspace),
           signal ?? new AbortController().signal,
         );
@@ -243,7 +244,28 @@ export function ExternalMcpManager({ onBack }: { onBack: () => void }) {
                   onSaved={load}
                 />
               </aside>
-              {current ? (
+              {current?.config === null ? (
+                <section>
+                  <h3>{current.name}</h3>
+                  <p>该配置无法安全使用，连接地址已隐藏。请使用符合要求的地址重新创建连接。</p>
+                  {current.cleanupRequired && (
+                    <Button
+                      disabled={cleaning}
+                      onClick={() => {
+                        setCleaning(true);
+                        void api(`${base(current.workspaceId)}/${current.id}/disable`, post())
+                          .then(() => load())
+                          .catch((cause: unknown) =>
+                            setError(cause instanceof Error ? cause.message : "清理连接失败"),
+                          )
+                          .finally(() => setCleaning(false));
+                      }}
+                    >
+                      停用并清除原配置
+                    </Button>
+                  )}
+                </section>
+              ) : current ? (
                 <ConnectionDetails
                   key={`${current.id}:${current.version}:${current.snapshotHash}:${JSON.stringify(current.approvedTools)}`}
                   connection={current}

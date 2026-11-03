@@ -48,6 +48,13 @@ export type ExternalConnection = {
   lifecycle: "connected" | "closing" | "cleanup_unknown" | "disconnected";
   toolsVerified: boolean;
 };
+export type BlockedConnection = Pick<
+  ExternalConnection,
+  "id" | "workspaceId" | "name" | "disabled"
+> & {
+  config: null;
+  cleanupRequired: boolean;
+};
 export type ExternalCall = {
   id: string;
   tool: string;

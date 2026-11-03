@@ -21,11 +21,12 @@ function grant(row: RowDataPacket): GrantView {
     workspaceId: row.workspaceId,
     sourceId: row.sourceId,
     connectorId: row.connectorId,
+    bindingGeneration: row.bindingGeneration,
     tables: delegatedTablesSchema.parse(decode(row.tables)),
     scopes,
     generation: Number(row.generation),
     expiresAt: new Date(row.expiresAt).getTime(),
-    revoked: row.revokedAt !== null,
+    revoked: row.revokedAt !== null || !row.bindingGeneration,
   };
 }
 /** MCP-owned persistence only; authentication/session and data bindings use public ports. */
@@ -104,7 +105,7 @@ export class McpStore {
   }
   async grants(owner: string): Promise<GrantView[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      "SELECT * FROM mcp_grant WHERE ownerId=? ORDER BY (revokedAt IS NULL AND expiresAt>UTC_TIMESTAMP(3)) DESC,createdAt DESC LIMIT 101",
+      "SELECT * FROM mcp_grant WHERE ownerId=? ORDER BY (bindingGeneration IS NOT NULL AND revokedAt IS NULL AND expiresAt>UTC_TIMESTAMP(3)) DESC,createdAt DESC LIMIT 101",
       [owner],
     );
     return rows.map(grant);
@@ -123,49 +124,50 @@ export class McpStore {
     });
   }
   async createGrant(
+    c: PoolConnection,
     owner: string,
     session: string,
     input: GrantInput,
     connectorId: string,
+    bindingGeneration: string,
     resource: string,
   ) {
-    return this.transaction(async (c) => {
-      const end = await this.sessionDeadline(c, owner, session);
-      if (!end) throw new McpError("MCP_SESSION_EXPIRED", 401);
-      const [clients] = await c.execute<RowDataPacket[]>(
-        "SELECT clientId FROM mcp_client WHERE clientId=? AND ownerId=? AND disabled=0 FOR UPDATE",
-        [input.clientId, owner],
-      );
-      if (clients.length !== 1) throw new McpError("MCP_CLIENT_NOT_FOUND", 404);
-      const [counts] = await c.execute<RowDataPacket[]>(
-        "SELECT COUNT(*) AS total FROM mcp_grant WHERE ownerId=? AND revokedAt IS NULL AND expiresAt>UTC_TIMESTAMP(3)",
-        [owner],
-      );
-      if (Number(counts[0]?.total) >= 100) throw new McpError("MCP_GRANT_CAPACITY", 429);
-      await c.execute(
-        "UPDATE mcp_grant SET revokedAt=COALESCE(revokedAt,UTC_TIMESTAMP(3)),generation=generation+1 WHERE ownerId=? AND clientId=? AND revokedAt IS NULL",
-        [owner, input.clientId],
-      );
-      const id = randomUUID(),
-        expiresAt = Math.min(end, Date.now() + input.durationMinutes * 60000);
-      await c.execute(
-        "INSERT INTO mcp_grant (id,ownerId,clientId,approvalSessionId,resource,generation,expiresAt,createdAt,workspaceId,sourceId,connectorId,tables,scopes) VALUES (?,?,?,?,?,1,?,UTC_TIMESTAMP(3),?,?,?,?,?)",
-        [
-          id,
-          owner,
-          input.clientId,
-          session,
-          resource,
-          new Date(expiresAt),
-          input.workspaceId,
-          input.sourceId,
-          connectorId,
-          JSON.stringify(input.tables),
-          JSON.stringify(input.scopes),
-        ],
-      );
-      return id;
-    });
+    const end = await this.sessionDeadline(c, owner, session);
+    if (!end) throw new McpError("MCP_SESSION_EXPIRED", 401);
+    const [clients] = await c.execute<RowDataPacket[]>(
+      "SELECT clientId FROM mcp_client WHERE clientId=? AND ownerId=? AND disabled=0 FOR UPDATE",
+      [input.clientId, owner],
+    );
+    if (clients.length !== 1) throw new McpError("MCP_CLIENT_NOT_FOUND", 404);
+    const [counts] = await c.execute<RowDataPacket[]>(
+      "SELECT COUNT(*) AS total FROM mcp_grant WHERE ownerId=? AND bindingGeneration IS NOT NULL AND revokedAt IS NULL AND expiresAt>UTC_TIMESTAMP(3)",
+      [owner],
+    );
+    if (Number(counts[0]?.total) >= 100) throw new McpError("MCP_GRANT_CAPACITY", 429);
+    await c.execute(
+      "UPDATE mcp_grant SET revokedAt=COALESCE(revokedAt,UTC_TIMESTAMP(3)),generation=generation+1 WHERE ownerId=? AND clientId=? AND revokedAt IS NULL",
+      [owner, input.clientId],
+    );
+    const id = randomUUID(),
+      expiresAt = Math.min(end, Date.now() + input.durationMinutes * 60000);
+    await c.execute(
+      "INSERT INTO mcp_grant (id,ownerId,clientId,approvalSessionId,resource,generation,expiresAt,createdAt,workspaceId,sourceId,connectorId,bindingGeneration,tables,scopes) VALUES (?,?,?,?,?,1,?,UTC_TIMESTAMP(3),?,?,?,?,?,?)",
+      [
+        id,
+        owner,
+        input.clientId,
+        session,
+        resource,
+        new Date(expiresAt),
+        input.workspaceId,
+        input.sourceId,
+        connectorId,
+        bindingGeneration,
+        JSON.stringify(input.tables),
+        JSON.stringify(input.scopes),
+      ],
+    );
+    return id;
   }
   async active(owner: string, id: string): Promise<GrantView> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
@@ -210,7 +212,7 @@ export class McpStore {
   async bindToken(token: string, binding: { grantId: string; generation: number }) {
     await this.transaction(async (c) => {
       const [rows] = await c.execute<RowDataPacket[]>(
-        "SELECT * FROM mcp_grant WHERE id=? AND revokedAt IS NULL AND generation=? AND expiresAt>UTC_TIMESTAMP(3) FOR SHARE",
+        "SELECT * FROM mcp_grant WHERE id=? AND bindingGeneration IS NOT NULL AND revokedAt IS NULL AND generation=? AND expiresAt>UTC_TIMESTAMP(3) FOR SHARE",
         [binding.grantId, binding.generation],
       );
       const r = rows[0];

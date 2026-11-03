@@ -15,6 +15,7 @@ function fixture(enabled = true) {
     sourceId = randomUUID(),
     connectorId = randomUUID(),
     grantId = randomUUID();
+  let bindingGeneration = randomUUID();
   const grant: GrantView = {
     id: grantId,
     ownerId,
@@ -23,6 +24,7 @@ function fixture(enabled = true) {
     workspaceId,
     sourceId,
     connectorId,
+    bindingGeneration,
     tables: [["orders", ["id", "label"]]],
     scopes: ["change:propose", "operation:read"],
     generation: 1,
@@ -41,7 +43,6 @@ function fixture(enabled = true) {
   };
   const records = new Map<string, Record<string, unknown>>();
   let active = true;
-  let bindingGeneration = randomUUID();
   let expireDuringReceipt = false;
   let receiptWait: Promise<void> | undefined;
   let receiptEntered: (() => void) | undefined;

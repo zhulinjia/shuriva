@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import { diagnostics } from "../logging/public.js";
 import { DataSourceError } from "./errors.js";
 import type { BoundSnapshot, BoundSourceAccess, SourceBindingIdentity } from "./public.js";
 import { validateSnapshot } from "./snapshot.js";
@@ -64,17 +65,21 @@ export class DataSourceStore implements BoundSourceAccess {
     boundedLockWait = false,
   ): Promise<T> {
     const connection = await this.pool.getConnection();
-    let previousLockWait: number | undefined;
+    let previousLockWait: { row: number; metadata: number } | undefined;
     let outcome: { ok: true; value: T } | { ok: false; error: unknown };
     try {
       if (boundedLockWait) {
         const [rows] = await connection.query<RowDataPacket[]>(
-          "SELECT @@SESSION.innodb_lock_wait_timeout AS timeout",
+          "SELECT @@SESSION.innodb_lock_wait_timeout AS rowTimeout, @@SESSION.lock_wait_timeout AS metadataTimeout",
         );
-        const timeout = Number(rows[0]?.timeout);
-        if (!Number.isInteger(timeout) || timeout < 1) throw new DataSourceError("NOT_FOUND");
-        previousLockWait = timeout;
-        await connection.query("SET SESSION innodb_lock_wait_timeout=5");
+        const row = Number(rows[0]?.rowTimeout);
+        const metadata = Number(rows[0]?.metadataTimeout);
+        if (!Number.isInteger(row) || row < 1 || !Number.isInteger(metadata) || metadata < 1)
+          throw new DataSourceError("NOT_FOUND");
+        previousLockWait = { row, metadata };
+        await connection.query(
+          "SET SESSION innodb_lock_wait_timeout=5, SESSION lock_wait_timeout=2",
+        );
       }
       await connection.beginTransaction();
       const result = await fn(connection);
@@ -85,6 +90,8 @@ export class DataSourceStore implements BoundSourceAccess {
       try {
         await connection.rollback();
       } catch (rollbackError) {
+        connection.destroy();
+        previousLockWait = undefined;
         outcome = {
           ok: false,
           error: new AggregateError(
@@ -99,18 +106,13 @@ export class DataSourceStore implements BoundSourceAccess {
         try {
           // mysql2's prepared numeric parameter is DOUBLE; this MySQL integer
           // system variable requires the escaped integer in the text protocol.
-          await connection.query("SET SESSION innodb_lock_wait_timeout=?", [previousLockWait]);
+          await connection.query(
+            "SET SESSION innodb_lock_wait_timeout=?, SESSION lock_wait_timeout=?",
+            [previousLockWait.row, previousLockWait.metadata],
+          );
         } catch (error) {
           connection.destroy();
-          outcome = {
-            ok: false,
-            error: outcome.ok
-              ? error
-              : new AggregateError(
-                  [outcome.error, error],
-                  "Source operation and connection reset failed",
-                ),
-          };
+          diagnostics.warn("datasource.connection_reset_failed", {}, error);
         }
       }
     } finally {
@@ -158,17 +160,37 @@ export class DataSourceStore implements BoundSourceAccess {
     owner: string,
     workspace: string,
     source: string,
-    action: (binding: { connectorId: string; bindingGeneration: string }) => Promise<T>,
+    action: (
+      binding: { connectorId: string; bindingGeneration: string },
+      signal: AbortSignal,
+      connection: PoolConnection,
+    ) => Promise<T>,
   ): Promise<T> {
     if (!this.bindingIdentities || !validId(workspace) || !validId(source))
       throw new DataSourceError("NOT_FOUND");
     return this.transaction(async (c) => {
-      await this.lockWorkspace(c, owner, workspace);
-      const current = await this.lockSource(c, owner, source);
-      await this.lockBinding(c, workspace, source);
-      const generation = await this.bindingGeneration(c, workspace, source);
-      if (!generation) throw new DataSourceError("NOT_FOUND");
-      return action({ connectorId: current.connectorId, bindingGeneration: generation });
+      const lease = new AbortController();
+      const lost = () => lease.abort(new Error("SOURCE_BINDING_LEASE_LOST"));
+      c.on("error", lost);
+      c.on("end", lost);
+      try {
+        await this.lockWorkspace(c, owner, workspace);
+        const current = await this.lockSource(c, owner, source);
+        await this.lockBinding(c, workspace, source);
+        const generation = await this.bindingGeneration(c, workspace, source);
+        if (!generation) throw new DataSourceError("NOT_FOUND");
+        lease.signal.throwIfAborted();
+        const result = await action(
+          { connectorId: current.connectorId, bindingGeneration: generation },
+          lease.signal,
+          c,
+        );
+        lease.signal.throwIfAborted();
+        return result;
+      } finally {
+        c.off("error", lost);
+        c.off("end", lost);
+      }
     }, true);
   }
 
@@ -427,13 +449,13 @@ export class DataSourceStore implements BoundSourceAccess {
     sourceId: string,
   ): Promise<{ connectorId: string; bindingGeneration: string | null } | null> {
     if (!validId(workspaceId) || !validId(sourceId)) throw new DataSourceError("INVALID");
-    const [rows] = await this.pool.execute<SourceRow[]>(
-      "SELECT s.connectorId FROM data_source s JOIN workspace_data_source b ON b.sourceId = s.id JOIN workspace w ON w.id = b.workspaceId WHERE s.id = ? AND s.ownerId = ? AND s.archivedAt IS NULL AND w.id = ? AND w.createdByAccountId = ? AND w.archivedAt IS NULL",
-      [sourceId, ownerId, workspaceId, ownerId],
-    );
-    const row = rows[0];
-    if (!row) return null;
-    if (!this.bindingIdentities) return { connectorId: row.connectorId, bindingGeneration: null };
+    if (!this.bindingIdentities) {
+      const [rows] = await this.pool.execute<SourceRow[]>(
+        "SELECT s.connectorId FROM data_source s JOIN workspace_data_source b ON b.sourceId = s.id JOIN workspace w ON w.id = b.workspaceId WHERE s.id = ? AND s.ownerId = ? AND s.archivedAt IS NULL AND w.id = ? AND w.createdByAccountId = ? AND w.archivedAt IS NULL",
+        [sourceId, ownerId, workspaceId, ownerId],
+      );
+      return rows[0] ? { connectorId: rows[0].connectorId, bindingGeneration: null } : null;
+    }
     const [identities] = await this.pool.execute<RowDataPacket[]>(
       "SELECT i.generation,s.connectorId FROM source_binding_identity i JOIN workspace_data_source b ON b.workspaceId=i.workspaceId AND b.sourceId=i.sourceId JOIN data_source s ON s.id=b.sourceId JOIN workspace w ON w.id=b.workspaceId WHERE b.workspaceId=? AND b.sourceId=? AND s.ownerId=? AND w.createdByAccountId=? AND s.archivedAt IS NULL AND w.archivedAt IS NULL",
       [workspaceId, sourceId, ownerId, ownerId],

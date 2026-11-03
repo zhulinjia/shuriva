@@ -68,7 +68,7 @@ ENABLE_STAGE9_MCP_CLIENT=0
 node --env-file=C:\ShurivaData\platform.env C:\Shuriva\platform\dist\src\main.js
 ```
 
-启动不会迁移数据库。新建的专用平台库先按 API 模块文档显式初始化 001–006，再按所需能力显式运行 007、008、009 对应迁移入口。发布产物内使用 `node --env-file=... platform/dist/src/migrations.js` 及相应阶段参数；绑定身份使用 `binding-migrate.js`、MCP Server 使用 `mcp-migrate.js`、MCP Client 使用 `mcp-client-migrate.js`。逐项查验迁移记录后再开启对应开关，不能手工重复运行建表 SQL。MySQL DDL 不能保证整批原子回滚，部分失败必须保留结构并走文档中的检查/前向恢复。
+启动只校验数据库结构。新建的专用平台库先按 API 模块文档显式初始化 001–006，再按所需能力执行迁移。发布产物内使用 `node --env-file=... platform/dist/src/migrations.js` 及相应阶段参数。绑定身份 009 使用 `binding-migrate.js`，MCP Server 007 和 010 使用 `mcp-migrate.js`，MCP Client 008 使用 `mcp-client-migrate.js`。启用 MCP Server 前先完成绑定身份迁移，再执行 MCP Server 迁移。解绑时数据库在同一事务中废止该绑定代次下的 MCP 授权。逐项查验迁移记录后再开启对应开关。部分迁移失败时保留已有结构并按文档检查后前向恢复。
 
 上方示例默认关闭数据源模块。需要登记 Connector 数据源时，先停止平台，在完成 001、002 的专用平台库执行 `migrations.js --stage3` 并核验，再将受保护配置中的 `ENABLE_STAGE3_DATASOURCES=1` 后重启，才可打开数据源页面取得工作区 ID 和登记绑定。只读查询另需 `ENABLE_STAGE4_READS=1` 并重启；不要仅设置 Connector 本机允许范围就认为平台模块已启用。具体发布包命令和顺序见 `CONNECTOR.md`。
 

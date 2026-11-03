@@ -61,13 +61,11 @@ export async function createMcpRuntime(input: {
   changeDraftsEnabled?: boolean;
 }) {
   await verifyMcpSchema(input.pools.storage);
-  if (input.changeDraftsEnabled === true) {
-    const c = await input.pools.storage.getConnection();
-    try {
-      if (!(await bindingIdentitiesAvailable(c))) throw new Error("MCP_CHANGE_BINDING_UNVERIFIED");
-    } finally {
-      c.release();
-    }
+  const c = await input.pools.storage.getConnection();
+  try {
+    if (!(await bindingIdentitiesAvailable(c))) throw new Error("MCP_BINDING_UNVERIFIED");
+  } finally {
+    c.release();
   }
   const options = createMcpOAuthOptions({
     resource: input.config.resource,

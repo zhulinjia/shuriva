@@ -55,6 +55,7 @@ export interface GrantView {
   workspaceId: string;
   sourceId: string;
   connectorId: string;
+  bindingGeneration: string | null;
   tables: z.infer<typeof delegatedTablesSchema>;
   scopes: string[];
   generation: number;

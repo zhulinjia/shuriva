@@ -8,6 +8,7 @@ import {
   type CallRecord,
   type StoredCallState,
   type Connection,
+  type ConnectionReference,
   storedCallStates,
   connectionConfig,
   ExternalMcpError,
@@ -24,7 +25,21 @@ function textJson(raw: unknown): unknown {
     throw new ExternalMcpError("EXTERNAL_MCP_STORAGE_INVALID", 503);
   }
 }
-function decodeConnection(r: RowDataPacket): Connection {
+function connectionReference(r: RowDataPacket): ConnectionReference {
+  return {
+    id: String(r.id),
+    ownerId: String(r.ownerId),
+    workspaceId: String(r.workspaceId),
+    name: String(r.name),
+    version: z.number().int().positive().parse(Number(r.version)),
+    credentialRef: z.string().uuid().parse(r.credentialRef),
+    disabled: !!r.disabled,
+  };
+}
+function decodeConnection(
+  r: RowDataPacket,
+  config = connectionConfig.parse(textJson(r.config)),
+): Connection {
   const snap = textJson(r.snapshot),
     approved = textJson(r.approvedTools);
   if (!Array.isArray(snap) || !Array.isArray(approved))
@@ -32,18 +47,12 @@ function decodeConnection(r: RowDataPacket): Connection {
   // Snapshot is written only after bounded validation; validate its shape again
   // at the application boundary before using a tool or compiling its schema.
   return {
+    ...connectionReference(r),
     executionHostId: z
       .string()
       .regex(/^[a-f0-9]{64}$/)
       .parse(r.executionHostId),
-    id: String(r.id),
-    ownerId: String(r.ownerId),
-    workspaceId: String(r.workspaceId),
-    name: String(r.name),
-    config: connectionConfig.parse(textJson(r.config)),
-    version: z.number().int().positive().parse(Number(r.version)),
-    credentialRef: z.string().uuid().parse(r.credentialRef),
-    disabled: !!r.disabled,
+    config,
     snapshot: z.array(toolSnapshotSchema).max(100).parse(snap),
     snapshotHash: r.snapshotHash === null ? null : String(r.snapshotHash),
     approvedTools: approvalsSchema.parse(approved),
@@ -88,7 +97,13 @@ export class ExternalMcpStore {
       "SELECT * FROM external_mcp_connection WHERE ownerId=? AND workspaceId=? ORDER BY id LIMIT 101",
       [owner, workspace],
     );
-    return rows.map(decodeConnection);
+    return rows.map((row) => {
+      const stored = textJson(row.config);
+      const config = connectionConfig.safeParse(stored);
+      return config.success
+        ? decodeConnection(row, config.data)
+        : { ...connectionReference(row), config: null, cleanupRequired: stored !== null };
+    });
   }
   async connection(owner: string, id: string) {
     const [rows] = await this.metadata.execute<RowDataPacket[]>(
@@ -97,7 +112,17 @@ export class ExternalMcpStore {
     );
     const r = rows[0];
     if (!r) throw new ExternalMcpError("EXTERNAL_MCP_NOT_FOUND", 404);
-    return decodeConnection(r);
+    const config = connectionConfig.safeParse(textJson(r.config));
+    if (!config.success) throw new ExternalMcpError("EXTERNAL_MCP_URL_REJECTED", 409);
+    return decodeConnection(r, config.data);
+  }
+  async connectionReference(owner: string, id: string) {
+    const [rows] = await this.metadata.execute<RowDataPacket[]>(
+      "SELECT id,ownerId,workspaceId,name,disabled,version,credentialRef FROM external_mcp_connection WHERE ownerId=? AND id=?",
+      [owner, id],
+    );
+    if (!rows[0]) throw new ExternalMcpError("EXTERNAL_MCP_NOT_FOUND", 404);
+    return connectionReference(rows[0]);
   }
   async create(
     owner: string,
@@ -128,22 +153,38 @@ export class ExternalMcpStore {
       return id;
     });
   }
-  async disable(owner: string, id: string) {
-    await this.transaction(owner, async (c) => {
-      const [rows] = await c.execute<RowDataPacket[]>(
-        "SELECT credentialRef,executionHostId FROM external_mcp_connection WHERE ownerId=? AND id=? FOR UPDATE",
-        [owner, id],
-      );
-      if (!rows[0]) throw new ExternalMcpError("EXTERNAL_MCP_NOT_FOUND", 404);
-      await c.execute(
-        "UPDATE external_mcp_connection SET disabled=1,version=version+1,approvedTools='[]',updatedAt=UTC_TIMESTAMP(3) WHERE ownerId=? AND id=?",
-        [owner, id],
-      );
-      await c.execute(
-        "INSERT INTO external_mcp_secret_gc(ref,ownerId,executionHostId,connectionId,notBefore) VALUES(?,?,?,?,UTC_TIMESTAMP(3)) ON DUPLICATE KEY UPDATE connectionId=VALUES(connectionId),notBefore=VALUES(notBefore)",
-        [rows[0].credentialRef, owner, rows[0].executionHostId, id],
-      );
-    });
+  async disable(reference: ConnectionReference, who: SessionIdentity) {
+    const { ownerId: owner, id, workspaceId, version } = reference;
+    if (who.ownerId !== owner) throw new ExternalMcpError("EXTERNAL_MCP_NOT_FOUND", 404);
+    let until = Number.POSITIVE_INFINITY;
+    const check = () => {
+      if (Date.now() >= until) throw new ExternalMcpError("EXTERNAL_MCP_SESSION_EXPIRED", 403);
+    };
+    await this.transaction(
+      owner,
+      async (c) => {
+        const [rows] = await c.execute<RowDataPacket[]>(
+          "SELECT credentialRef,executionHostId,config FROM external_mcp_connection WHERE ownerId=? AND id=? AND workspaceId=? AND version=? FOR UPDATE",
+          [owner, id, workspaceId, version],
+        );
+        if (!rows[0]) throw new ExternalMcpError("EXTERNAL_MCP_VERSION_CHANGED", 409);
+        if (!(await workspaceReferenceActive(c, owner, workspaceId)))
+          throw new ExternalMcpError("EXTERNAL_MCP_WORKSPACE_REJECTED", 403);
+        const deadline = await authSessionReferenceDeadline(c, owner, who.sessionId);
+        if (deadline === undefined) throw new ExternalMcpError("EXTERNAL_MCP_SESSION_EXPIRED", 403);
+        until = deadline;
+        const redact = !connectionConfig.safeParse(textJson(rows[0].config)).success;
+        await c.execute(
+          "UPDATE external_mcp_connection SET disabled=1,version=version+1,approvedTools='[]',config=IF(?,CAST('null' AS JSON),config),updatedAt=UTC_TIMESTAMP(3) WHERE ownerId=? AND id=?",
+          [redact ? 1 : 0, owner, id],
+        );
+        await c.execute(
+          "INSERT INTO external_mcp_secret_gc(ref,ownerId,executionHostId,connectionId,notBefore) VALUES(?,?,?,?,UTC_TIMESTAMP(3)) ON DUPLICATE KEY UPDATE connectionId=VALUES(connectionId),notBefore=VALUES(notBefore)",
+          [rows[0].credentialRef, owner, rows[0].executionHostId, id],
+        );
+      },
+      check,
+    );
   }
   async stageCredential(owner: string, ref: string, executionHostId: string) {
     await this.transaction(owner, async (c) => {

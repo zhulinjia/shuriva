@@ -227,9 +227,20 @@ export class McpInvocations {
     if (permission && (!g.scopes.includes(permission) || !s.scopes.includes(permission)))
       throw new McpError("MCP_SCOPE_REJECTED", 403);
     await this.coordinator.withScope(g, async (b) => {
-      if (b.connectorId !== g.connectorId) throw new McpError("MCP_BINDING_CHANGED", 403);
+      this.matchBinding(g, b);
     });
     return g;
+  }
+  private matchBinding(
+    grant: GrantView,
+    binding: { connectorId: string; bindingGeneration?: string | null },
+  ) {
+    if (
+      binding.connectorId !== grant.connectorId ||
+      !grant.bindingGeneration ||
+      binding.bindingGeneration !== grant.bindingGeneration
+    )
+      throw new McpError("MCP_BINDING_CHANGED", 403);
   }
   async recipient(s: AuthorizedMcpGrant) {
     const c = await this.store.client(s.ownerId, s.clientId);
@@ -261,8 +272,8 @@ export class McpInvocations {
     const row = id ? await this.owned(g.ownerId, id) : undefined;
     if (row && (row.grantId !== g.id || row.generation !== g.generation))
       throw new McpError("MCP_INVOCATION_NOT_FOUND", 404);
-    return this.coordinator.withScope(g, async (binding) => {
-      if (binding.connectorId !== g.connectorId) throw new McpError("MCP_BINDING_CHANGED", 403);
+    return this.coordinator.withBoundIdentity(g, async (binding, bindingSignal) => {
+      this.matchBinding(g, binding);
       return this.withAuthorization(
         headers,
         async (fresh, assertActive, signal) => {
@@ -271,6 +282,7 @@ export class McpInvocations {
           const retained =
             result && typeof result === "object" ? this.disclosures.get(result) : undefined;
           const check = () => {
+            bindingSignal.throwIfAborted();
             assertActive();
             if (retained) {
               if (retained.id !== id) throw new McpError("MCP_RESULT_EXPIRED", 410);
@@ -304,12 +316,13 @@ export class McpInvocations {
               check,
               AbortSignal.any([
                 signal,
+                bindingSignal,
                 retained.live.abort.signal,
                 AbortSignal.timeout(Math.max(1, this.remaining(retained.live))),
               ]),
             );
           }
-          return send(assertActive, signal);
+          return send(check, AbortSignal.any([signal, bindingSignal]));
         },
         row?.approvalSessionId ?? undefined,
       );
@@ -338,6 +351,7 @@ export class McpInvocations {
         workspaceId: g.workspaceId,
         sourceId: g.sourceId,
         connectorId: g.connectorId,
+        bindingGeneration: g.bindingGeneration,
       },
       until: Math.min(s.validUntil, Date.now() + 120000),
       monotonicUntil: performance.now() + Math.max(0, Math.min(s.validUntil - Date.now(), 120000)),
@@ -370,8 +384,7 @@ export class McpInvocations {
     const g = await this.current(s, "change:propose"),
       recipient = await this.recipient(s);
     const prepared = await this.coordinator.withBoundIdentity(g, async (binding) => {
-      if (binding.connectorId !== g.connectorId || !binding.bindingGeneration)
-        throw new McpError("MCP_CHANGE_BINDING_UNVERIFIED", 503);
+      this.matchBinding(g, binding);
       return this.stageChange(s, h, g, input, recipient, binding.bindingGeneration);
     });
     input = undefined;
@@ -828,35 +841,43 @@ export class McpInvocations {
           },
           () => false,
         ),
-      (action) =>
-        this.withAuthorization(
-          live.headers,
-          async (s, assertActive, signal) => {
-            this.match(s, g);
-            if (live.taskId !== taskId || this.remaining(live) <= 0)
-              throw new McpError("MCP_APPROVAL_STALE", 409);
-            const check = () => {
-              assertActive();
-              if (
-                !live.ready ||
-                live.cleanupRequired ||
-                live.abort.signal.aborted ||
-                this.remaining(live) <= 0
-              )
+      (action) => {
+        const approvalSession = live.approvalSessionId;
+        if (!approvalSession) throw new McpError("MCP_APPROVAL_STALE", 409);
+        return this.coordinator.withStoredBinding(g, (_binding, bindingSignal) =>
+          this.withAuthorization(
+            live.headers,
+            async (s, assertActive, signal) => {
+              this.match(s, g);
+              if (live.taskId !== taskId || this.remaining(live) <= 0)
                 throw new McpError("MCP_APPROVAL_STALE", 409);
-            };
-            check();
-            return action(
-              check,
-              AbortSignal.any([
-                signal,
-                live.abort.signal,
-                AbortSignal.timeout(Math.max(1, this.remaining(live))),
-              ]),
-            );
-          },
-          live.approvalSessionId,
-        ),
+              const check = () => {
+                bindingSignal.throwIfAborted();
+                assertActive();
+                if (
+                  !live.ready ||
+                  live.cleanupRequired ||
+                  live.abort.signal.aborted ||
+                  this.remaining(live) <= 0
+                )
+                  throw new McpError("MCP_APPROVAL_STALE", 409);
+              };
+              check();
+              return action(
+                check,
+                AbortSignal.any([
+                  signal,
+                  bindingSignal,
+                  live.abort.signal,
+                  AbortSignal.timeout(Math.max(1, this.remaining(live))),
+                ]),
+                approvalSession,
+              );
+            },
+            approvalSession,
+          ),
+        );
+      },
     );
   }
   /** Decode only inside final authorization, then leave the synchronous frame
@@ -890,8 +911,8 @@ export class McpInvocations {
   }
   private async start(row: Invocation, live: Live, g: GrantView, session: string, query = false) {
     await this.coordinator.withScope(g, async (binding) => {
-      if (binding.connectorId !== g.connectorId || live.until <= Date.now())
-        throw new McpError("MCP_BINDING_CHANGED", 403);
+      this.matchBinding(g, binding);
+      if (live.until <= Date.now()) throw new McpError("MCP_BINDING_CHANGED", 403);
       await this.withAuthorization(
         live.headers,
         async (s, assertActive) => {
@@ -1146,7 +1167,7 @@ export class McpInvocations {
       sessionId = row.approvalSessionId;
     try {
       const observed = await this.coordinator.withScope(g, async (binding) => {
-        if (binding.connectorId !== g.connectorId) throw new McpError("MCP_BINDING_CHANGED", 403);
+        this.matchBinding(g, binding);
         return this.withAuthorization(headers, async (fresh) => {
           this.match(fresh, g);
           const result = this.job(live, row);
@@ -1220,7 +1241,8 @@ export class McpInvocations {
   }
   async cancel(s: AuthorizedMcpGrant, id: string) {
     const g = await this.current(s, "operation:cancel");
-    return this.coordinator.withScope(g, async () => {
+    return this.coordinator.withScope(g, async (binding) => {
+      this.matchBinding(g, binding);
       const row = await this.owned(g.ownerId, id);
       if (row.grantId !== g.id || row.generation !== g.generation)
         throw new McpError("MCP_INVOCATION_NOT_FOUND", 404);

@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { test } from "node:test";
-import type { RowDataPacket } from "mysql2/promise";
+import type { Pool, RowDataPacket } from "mysql2/promise";
 import { mcpFixture } from "./mcp-fixture.js";
 import { authMutationIdentity } from "../src/auth.js";
-import { verifyMcpSchema } from "../src/mcp/migration.js";
+import { DataSourceStore } from "../src/datasources/store.js";
+import { migrateMcpSchema, verifyMcpSchema } from "../src/mcp/migration.js";
 import { grantInput } from "../src/mcp/model.js";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { mutationFixture } from "./mutation-fixture.js";
 
 const enabled = process.env.STAGE9_G3_TEST === "1";
 async function barrier() {
@@ -112,6 +114,127 @@ test("failed source requests cannot disable an otherwise valid bearer", {
     }),
   );
   assert.ok((await client.listTools()).tools.some((t) => t.name === "query_prepare"));
+});
+
+test("publication fences a database rebind and the old grant cannot follow it", {
+  skip: !enabled,
+  timeout: 30000,
+}, async (t) => {
+  const f = await mcpFixture();
+  t.after(() => f.close());
+  const headers = { authorization: `Bearer ${await f.token()}` };
+  const subject = await f.runtime.oauth.verify(headers);
+  const entered = await barrier(),
+    finish = await barrier();
+  const publication = f.runtime.invocations.publish(
+    subject,
+    headers,
+    "metadata:read",
+    undefined,
+    async () => {
+      entered.release();
+      await finish.wait;
+    },
+    "schema_get",
+  );
+  await Promise.race([entered.wait, publication]);
+  let unbound = false;
+  const { ownerId, workspaceId, sourceId } = f.binding;
+  const unbind = f.sources.unbind(ownerId, workspaceId, sourceId).then(() => {
+    unbound = true;
+  });
+  try {
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(unbound, false);
+  } finally {
+    finish.release();
+    await Promise.all([unbind, publication]);
+  }
+  await f.sources.bind(ownerId, workspaceId, sourceId);
+  await assert.rejects(
+    f.runtime.invocations.current(subject, "metadata:read"),
+    /MCP_GRANT_REJECTED/,
+  );
+  await assert.rejects(f.runtime.oauth.verify(headers));
+  assert.equal((await f.runtime.store.grants(ownerId))[0]?.revoked, true);
+});
+
+test("explicit MCP migration resumes after binding-column DDL commits", {
+  skip: !enabled,
+  timeout: 30000,
+}, async (t) => {
+  const f = await mutationFixture();
+  t.after(() => f.close());
+  const fault = new Proxy(f.pool, {
+    get(pool, property) {
+      if (property !== "getConnection") return Reflect.get(pool, property);
+      return async () => {
+        const c = await pool.getConnection();
+        return new Proxy(c, {
+          get(target, key) {
+            if (key === "execute")
+              return async (sql: string, values: unknown) => {
+                if (sql.startsWith("UPDATE mcp_schema_version SET version=2"))
+                  throw Error("synthetic migration interruption");
+                return Reflect.apply(target.execute, target, [sql, values]);
+              };
+            const value: unknown = Reflect.get(target, key);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+      };
+    },
+  }) as Pool;
+  await assert.rejects(migrateMcpSchema(fault), /synthetic migration interruption/);
+  await assert.rejects(verifyMcpSchema(f.pool), /MCP_SCHEMA_NOT_CURRENT/);
+  await migrateMcpSchema(f.pool);
+  await verifyMcpSchema(f.pool);
+});
+
+test("a confirmed grant commit remains successful when the pool reset fails", {
+  skip: !enabled,
+  timeout: 30000,
+}, async (t) => {
+  const f = await mcpFixture();
+  t.after(() => f.close());
+  const pool = new Proxy(f.pool, {
+    get(target, property) {
+      if (property !== "getConnection") return Reflect.get(target, property);
+      return async () => {
+        const connection = await target.getConnection();
+        return new Proxy(connection, {
+          get(c, key) {
+            if (key === "query")
+              return async (sql: string, values?: unknown) => {
+                if (sql.startsWith("SET SESSION innodb_lock_wait_timeout=?"))
+                  throw Error("synthetic reset failure");
+                return Reflect.apply(c.query, c, [sql, values]);
+              };
+            const value: unknown = Reflect.get(c, key);
+            return typeof value === "function" ? value.bind(c) : value;
+          },
+        });
+      };
+    },
+  }) as Pool;
+  const { ownerId, workspaceId, sourceId } = f.binding;
+  const id = await new DataSourceStore(pool, true).withBoundIdentity(
+    ownerId,
+    workspaceId,
+    sourceId,
+    (binding, _signal, connection) =>
+      f.runtime.store.createGrant(
+        connection,
+        ownerId,
+        f.identity.sessionId,
+        grantInput.parse(f.scope),
+        binding.connectorId,
+        binding.bindingGeneration,
+        f.resource,
+      ),
+  );
+  assert.equal((await f.runtime.store.active(ownerId, id)).id, id);
+  await assert.rejects(f.runtime.store.active(ownerId, f.grant.id), /MCP_GRANT_REJECTED/);
 });
 const answer = Buffer.from(
   JSON.stringify({
@@ -304,12 +427,20 @@ test("revoked/expired metadata does not permanently consume new grant admission"
   const f = await mcpFixture();
   t.after(() => f.close());
   for (let i = 0; i < 101; i++)
-    await f.runtime.store.createGrant(
-      f.identity.ownerId,
-      f.identity.sessionId,
-      grantInput.parse({ ...f.scope, tables: [["customers", ["id"]]], durationMinutes: 5 }),
-      f.binding.connectorId,
-      f.resource,
+    await f.sources.withBoundIdentity(
+      f.binding.ownerId,
+      f.binding.workspaceId,
+      f.binding.sourceId,
+      (binding, _signal, connection) =>
+        f.runtime.store.createGrant(
+          connection,
+          f.identity.ownerId,
+          f.identity.sessionId,
+          grantInput.parse({ ...f.scope, tables: [["customers", ["id"]]], durationMinutes: 5 }),
+          binding.connectorId,
+          binding.bindingGeneration,
+          f.resource,
+        ),
     );
   assert.ok((await f.runtime.store.grants(f.identity.ownerId)).some((g) => !g.revoked));
 });
