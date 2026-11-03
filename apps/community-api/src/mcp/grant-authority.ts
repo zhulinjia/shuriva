@@ -21,8 +21,20 @@ export interface McpGrantRecord {
   readonly expiresAt: number;
   readonly revoked: boolean;
 }
+/** Receipt identity check executed on the transaction holding the grant and
+ * session locks. No durable success is inferred from uncertain COMMIT timing. */
+export type HandoffReceipt = (input: {
+  ownerId: string;
+  id: string;
+  grantId: string;
+  generation: number;
+  commitment: string;
+  bootId: string;
+  sessionId: string;
+}) => Promise<boolean>;
 
 export interface McpGrantObservation {
+  health?(): { outstanding: number; capacity: number; available: boolean };
   /** Hold grant, token binding and actual approval-session locks while the
    * asynchronous decision runs; fail closed on any storage/locking error. */
   observe(
@@ -30,6 +42,9 @@ export interface McpGrantObservation {
     decide: (snapshot: {
       readonly grant: McpGrantRecord | null;
       readonly sessionExpiresAt: number | undefined;
+      readonly assertActive?: () => void;
+      readonly signal?: AbortSignal;
+      readonly acknowledgeHandoff?: HandoffReceipt;
     }) => Promise<boolean>,
   ): Promise<boolean>;
 }
@@ -81,6 +96,12 @@ export function createMcpGrantAuthority(
     token: string,
     initial: VerifiedMcpToken,
     confirmAuthentication: () => Promise<VerifiedMcpToken | null>,
+    whileAuthorized?: (
+      grant: AuthorizedMcpGrant,
+      assertActive: () => void,
+      signal: AbortSignal,
+      acknowledgeHandoff?: HandoffReceipt,
+    ) => Promise<void>,
   ): Promise<AuthorizedMcpGrant | null> => {
     if (!token || Buffer.byteLength(token) > 4096 || !matchesToken(initial)) return null;
     // A caller must not be able to change the checked claims while storage or
@@ -92,54 +113,72 @@ export function createMcpGrantAuthority(
     });
     const hash = createHash("sha256").update(token).digest("hex");
     let approved: AuthorizedMcpGrant | undefined;
-    const accepted = await store.observe(hash, async ({ grant, sessionExpiresAt }) => {
-      if (
-        !grant ||
-        grant.revoked ||
-        !grant.id ||
-        !grant.approvalSessionId ||
-        grant.ownerId !== checked.ownerId ||
-        grant.clientId !== checked.clientId ||
-        grant.resource !== resource ||
-        !Number.isSafeInteger(grant.generation) ||
-        grant.generation < 1 ||
-        grant.generation !== grant.tokenGeneration ||
-        !Number.isFinite(grant.expiresAt) ||
-        sessionExpiresAt === undefined ||
-        !Number.isFinite(sessionExpiresAt) ||
-        grant.expiresAt <= clock() ||
-        sessionExpiresAt <= clock()
-      )
-        return false;
-      const final = await confirmAuthentication();
-      if (
-        !final ||
-        !matchesToken(final) ||
-        final.ownerId !== checked.ownerId ||
-        final.clientId !== checked.clientId ||
-        final.issuer !== checked.issuer ||
-        !sameScopes(checked.scopes, final.scopes)
-      )
-        return false;
-      const validUntil = Math.min(
-        grant.expiresAt,
-        sessionExpiresAt,
-        checked.expiresAt,
-        final.expiresAt,
-      );
-      if (validUntil <= clock()) return false;
-      approved = Object.freeze({
-        id: grant.id,
-        ownerId: grant.ownerId,
-        clientId: grant.clientId,
-        approvalSessionId: grant.approvalSessionId,
-        resource,
-        generation: grant.generation,
-        scopes: Object.freeze([...final.scopes]),
-        validUntil,
-      });
-      return true;
-    });
+    const accepted = await store.observe(
+      hash,
+      async ({ grant, sessionExpiresAt, assertActive, signal, acknowledgeHandoff }) => {
+        if (
+          !grant ||
+          grant.revoked ||
+          !grant.id ||
+          !grant.approvalSessionId ||
+          grant.ownerId !== checked.ownerId ||
+          grant.clientId !== checked.clientId ||
+          grant.resource !== resource ||
+          !Number.isSafeInteger(grant.generation) ||
+          grant.generation < 1 ||
+          grant.generation !== grant.tokenGeneration ||
+          !Number.isFinite(grant.expiresAt) ||
+          sessionExpiresAt === undefined ||
+          !Number.isFinite(sessionExpiresAt) ||
+          grant.expiresAt <= clock() ||
+          sessionExpiresAt <= clock()
+        )
+          return false;
+        const final = await confirmAuthentication();
+        if (
+          !final ||
+          !matchesToken(final) ||
+          final.ownerId !== checked.ownerId ||
+          final.clientId !== checked.clientId ||
+          final.issuer !== checked.issuer ||
+          !sameScopes(checked.scopes, final.scopes)
+        )
+          return false;
+        const validUntil = Math.min(
+          grant.expiresAt,
+          sessionExpiresAt,
+          checked.expiresAt,
+          final.expiresAt,
+        );
+        if (validUntil <= clock()) return false;
+        approved = Object.freeze({
+          id: grant.id,
+          ownerId: grant.ownerId,
+          clientId: grant.clientId,
+          approvalSessionId: grant.approvalSessionId,
+          resource,
+          generation: grant.generation,
+          scopes: Object.freeze([...final.scopes]),
+          validUntil,
+        });
+        const ensure = () => {
+          assertActive?.();
+          if (validUntil <= clock()) throw new Error("MCP_GRANT_EXPIRED");
+        };
+        ensure();
+        if (whileAuthorized)
+          await whileAuthorized(
+            approved,
+            ensure,
+            AbortSignal.any([
+              signal ?? new AbortController().signal,
+              AbortSignal.timeout(Math.max(1, validUntil - clock())),
+            ]),
+            acknowledgeHandoff,
+          );
+        return true;
+      },
+    );
     return accepted && approved && approved.validUntil > clock() ? approved : null;
   };
 }

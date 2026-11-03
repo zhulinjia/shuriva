@@ -1,6 +1,6 @@
 import { Button } from "@workspace/ui";
 import { ArrowRight, Bot, Database, Layers3, Link2, LogOut, ShieldCheck } from "lucide-react";
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, post } from "./api";
 import { ConnectorManager } from "./ConnectorManager";
 import { ChatWorkspace } from "./chat/ChatWorkspace";
@@ -9,6 +9,10 @@ import { ModelSettings } from "./ModelSettings";
 import { SecurityPanel } from "./SecurityPanel";
 import { confirmSemanticLeave, emptySemanticGuard, type SemanticGuard } from "./semantic-editor";
 import { type Workspace, WorkspaceManager } from "./WorkspaceManager";
+import { McpManager } from "./mcp/McpManager";
+import { ExternalMcpManager } from "./mcp-client/ExternalMcpManager";
+import { MutationPanel } from "./mutations/MutationPanel";
+import { readChangeRecovery } from "./mutations/recovery";
 
 type Session = { user: { name: string; username?: string } };
 export function App() {
@@ -16,18 +20,42 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<Workspace | null>(null);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryVersion, setRecoveryVersion] = useState(0);
   const [security, setSecurity] = useState(false);
   const [connectors, setConnectors] = useState(false);
   const [dataSources, setDataSources] = useState(false);
   const [models, setModels] = useState(false);
+  const [external, setExternal] = useState(() =>
+    new URLSearchParams(window.location.search).has("externalMcpOAuth"),
+  );
+  const [mcp, setMcp] = useState(() => {
+    const q = new URLSearchParams(window.location.search);
+    return q.has("mcpApproval") || q.has("mcpConsent") || q.has("mcpLogin") || q.has("mcpChange");
+  });
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [mcpBusy, setMcpBusy] = useState(false);
+  const mcpBusyRef = useRef(false);
+  const updateMcpBusy = useCallback((value: boolean) => {
+    mcpBusyRef.current = value;
+    setMcpBusy(value);
+  }, []);
   const semanticGuard = useRef(emptySemanticGuard());
+  const recoveryState = useMemo(() => {
+    void recoveryVersion;
+    try {
+      return { saved: readChangeRecovery(), error: false };
+    } catch {
+      return { saved: null, error: true };
+    }
+  }, [recoveryVersion]);
   const updateSemanticGuard = useCallback((guard: SemanticGuard) => {
     semanticGuard.current = guard;
   }, []);
-  const canLeaveDataSources = () => confirmSemanticLeave(semanticGuard.current, window);
+  const canLeaveDataSources = () =>
+    !mcpBusyRef.current && confirmSemanticLeave(semanticGuard.current, window);
   useEffect(() => {
     let active = true;
     api<Session | null>("/api/auth/get-session")
@@ -51,6 +79,10 @@ export function App() {
     setConnectors(false);
     setDataSources(false);
     setModels(false);
+    setMcp(false);
+    setExternal(false);
+    setShowRecovery(false);
+    setRecoveryVersion((value) => value + 1);
   }
   async function login(event: FormEvent) {
     event.preventDefault();
@@ -86,7 +118,10 @@ export function App() {
       <ChatWorkspace
         workspaceId={selected.id}
         workspaceName={selected.name}
-        onBack={() => setSelected(null)}
+        onBack={() => {
+          setSelected(null);
+          setRecoveryVersion((value) => value + 1);
+        }}
       />
     );
   return (
@@ -103,15 +138,37 @@ export function App() {
         </div>
         {session && (
           <div className="product-account">
+            <Button
+              className="product-signout"
+              aria-label="外部 MCP 工具"
+              disabled={mcpBusy}
+              onClick={() => {
+                if (!canLeaveDataSources()) return;
+                setDataSources(false);
+                setMcp(false);
+                setConnectors(false);
+                setSecurity(false);
+                setModels(false);
+                setExternal(true);
+                setShowRecovery(false);
+              }}
+            >
+              外部 MCP
+            </Button>
             <span>{session.user.name}</span>
             <Button
               className="product-signout"
               aria-label="数据源"
+              disabled={mcpBusy}
               onClick={() => {
+                if (mcpBusyRef.current) return;
                 setDataSources(true);
+                setExternal(false);
+                setMcp(false);
                 setConnectors(false);
                 setSecurity(false);
                 setModels(false);
+                setShowRecovery(false);
               }}
             >
               <Database size={16} />
@@ -120,12 +177,16 @@ export function App() {
             <Button
               className="product-signout"
               aria-label="连接器"
+              disabled={mcpBusy}
               onClick={() => {
                 if (!canLeaveDataSources()) return;
                 setConnectors(true);
+                setExternal(false);
+                setMcp(false);
                 setSecurity(false);
                 setDataSources(false);
                 setModels(false);
+                setShowRecovery(false);
               }}
             >
               <Link2 size={16} />
@@ -134,12 +195,16 @@ export function App() {
             <Button
               className="product-signout"
               aria-label="账号安全"
+              disabled={mcpBusy}
               onClick={() => {
                 if (!canLeaveDataSources()) return;
                 setSecurity(true);
+                setExternal(false);
+                setMcp(false);
                 setConnectors(false);
                 setDataSources(false);
                 setModels(false);
+                setShowRecovery(false);
               }}
             >
               <ShieldCheck size={16} />
@@ -148,12 +213,16 @@ export function App() {
             <Button
               className="product-signout"
               aria-label="模型配置"
+              disabled={mcpBusy}
               onClick={() => {
                 if (!canLeaveDataSources()) return;
                 setModels(true);
+                setExternal(false);
+                setMcp(false);
                 setDataSources(false);
                 setConnectors(false);
                 setSecurity(false);
+                setShowRecovery(false);
               }}
             >
               <Bot size={16} />
@@ -161,9 +230,27 @@ export function App() {
             </Button>
             <Button
               className="product-signout"
+              aria-label="MCP 管理"
+              disabled={mcpBusy}
+              onClick={() => {
+                if (!canLeaveDataSources()) return;
+                setMcp(true);
+                setExternal(false);
+                setModels(false);
+                setDataSources(false);
+                setConnectors(false);
+                setSecurity(false);
+                setShowRecovery(false);
+              }}
+            >
+              <Link2 size={16} />
+              <span className="account-action-label">MCP</span>
+            </Button>
+            <Button
+              className="product-signout"
               aria-label="退出登录"
               onClick={logout}
-              disabled={busy}
+              disabled={busy || mcpBusy}
             >
               <LogOut size={16} />
               <span className="account-action-label">退出登录</span>
@@ -171,6 +258,21 @@ export function App() {
           </div>
         )}
       </header>
+      {session && !showRecovery && !mcp && recoveryState.error && (
+        <p role="alert">
+          无法读取本标签页的待核对记录，状态未知；请先恢复浏览器存储权限，勿重复提交。
+        </p>
+      )}
+      {session && !showRecovery && !mcp && recoveryState.saved?.invocationId === null && (
+        <section className="settings-card" aria-label="待核对确认">
+          <p>本标签页保存了一项待核对确认，不能据此判断执行结果。</p>
+          <p>
+            工作区 ID：{recoveryState.saved.workspaceId}；数据源 ID：{recoveryState.saved.sourceId}
+            ；确认编号：{recoveryState.saved.confirmation.confirmationId}
+          </p>
+          <Button onClick={() => setShowRecovery(true)}>继续核对原确认</Button>
+        </section>
+      )}
       {loading ? (
         <main className="product-loading">正在连接工作区…</main>
       ) : !session ? (
@@ -229,6 +331,43 @@ export function App() {
             <div className="login-help">首次使用？请先在服务器终端初始化管理员账号。</div>
           </section>
         </main>
+      ) : showRecovery && recoveryState.saved?.invocationId === null ? (
+        <main className="settings-page">
+          <Button
+            disabled={mcpBusy}
+            onClick={() => {
+              if (!mcpBusyRef.current) {
+                setShowRecovery(false);
+                setRecoveryVersion((value) => value + 1);
+              }
+            }}
+          >
+            返回工作区
+          </Button>
+          <p>以下编号来自本标签页；服务器会按当前登录身份和数据范围重新核验。</p>
+          <p>
+            工作区 ID：{recoveryState.saved.workspaceId}；数据源 ID：{recoveryState.saved.sourceId}
+          </p>
+          <MutationPanel
+            workspaceId={recoveryState.saved.workspaceId}
+            sourceId={recoveryState.saved.sourceId}
+            sourceName={recoveryState.saved.sourceId}
+            showScopeIdentity
+            onBusyChange={updateMcpBusy}
+          />
+        </main>
+      ) : external ? (
+        <ExternalMcpManager onBack={() => setExternal(false)} />
+      ) : mcp ? (
+        <McpManager
+          onBack={() => {
+            if (!mcpBusyRef.current) {
+              setMcp(false);
+              setRecoveryVersion((value) => value + 1);
+            }
+          }}
+          onBusyChange={updateMcpBusy}
+        />
       ) : models ? (
         <ModelSettings onBack={() => setModels(false)} />
       ) : dataSources ? (

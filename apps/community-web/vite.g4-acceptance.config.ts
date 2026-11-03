@@ -15,6 +15,16 @@ export default defineConfig({
     host: "127.0.0.2",
     port: 5193,
     strictPort: true,
-    proxy: { "/api": { target: "http://127.0.0.1:43129", changeOrigin: false } },
+    proxy: {
+      "/api": { target: "http://127.0.0.1:43129", changeOrigin: false },
+      "^/\\.well-known/oauth-authorization-server/api/auth(?:\\?.*)?$": {
+        target: "http://127.0.0.1:43129",
+        changeOrigin: false,
+      },
+      "^/\\.well-known/openid-configuration/api/auth(?:\\?.*)?$": {
+        target: "http://127.0.0.1:43129",
+        changeOrigin: false,
+      },
+    },
   },
 });

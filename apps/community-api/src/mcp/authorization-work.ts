@@ -42,4 +42,15 @@ export class AuthorizationWork {
       if (timer) clearTimeout(timer);
     }
   }
+  /** State-changing exchanges must settle authoritatively; cap outstanding
+   * physical work without returning a fictitious timeout before it completes. */
+  async settle<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.pending >= this.maximum) throw new Error("MCP_AUTH_CAPACITY");
+    this.pending++;
+    try {
+      return await operation();
+    } finally {
+      this.pending--;
+    }
+  }
 }

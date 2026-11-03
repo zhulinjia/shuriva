@@ -12,8 +12,10 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "format:check": "biome format apps/community-api/src apps/community-api/test apps/community-web/src packages/ui/src scripts",
-    "lint": "biome lint apps/community-api/src apps/community-api/test apps/community-web/src packages/ui/src scripts",
+    "test:release": "node --test scripts/test/*.test.mjs",
+    "release:candidate": "pwsh -NoProfile -File scripts/build-release.ps1 -Candidate",
+    "format:check": "biome format apps/community-api/src apps/community-api/test apps/community-web/src packages/ui/src packages/core-contracts/src packages/core-contracts/test scripts",
+    "lint": "biome lint apps/community-api/src apps/community-api/test apps/community-web/src packages/ui/src packages/core-contracts/src packages/core-contracts/test scripts",
     "check:boundaries": "node scripts/check-boundaries.mjs --self-test && node scripts/check-boundaries.mjs",
     "db:design-validate": "prisma validate"
   },

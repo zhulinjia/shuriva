@@ -19,6 +19,7 @@ const features = new Set([
   "semantic",
   "logging",
   "mcp",
+  "mcp-client",
 ]);
 const diagnosticEvents = new Set();
 const eventSource = ts.createSourceFile(
@@ -55,7 +56,7 @@ function moduleTarget(node) {
   return undefined;
 }
 
-function violation(source, specifier) {
+function violation(source, specifier, kind = "import") {
   const from = source.replaceAll("\\", "/");
   const fromKey = from.toLowerCase();
   if (
@@ -66,8 +67,13 @@ function violation(source, specifier) {
   let resolved = "";
   if (specifier.startsWith(".") || /^file:/i.test(specifier)) {
     try {
-      const base = pathToFileURL(`${path.resolve(root, path.dirname(from))}${path.sep}`);
-      resolved = fileURLToPath(new URL(specifier, base)).replaceAll("\\", "/");
+      // CommonJS treats # and % as literal path characters; ESM uses URL semantics.
+      if (kind === "require" && specifier.startsWith("."))
+        resolved = path.resolve(root, path.dirname(from), specifier).replaceAll("\\", "/");
+      else {
+        const base = pathToFileURL(`${path.resolve(root, path.dirname(from))}${path.sep}`);
+        resolved = fileURLToPath(new URL(specifier, base)).replaceAll("\\", "/");
+      }
     } catch {
       return "invalid module file URL";
     }
@@ -81,6 +87,7 @@ function violation(source, specifier) {
     relativeKey.startsWith("apps/community-web/") ||
     specifier.startsWith("@workspace/community-web");
   const toUI =
+    relativeKey === "packages/ui" ||
     relativeKey.startsWith("packages/ui/") ||
     specifier === "@workspace/ui" ||
     specifier.startsWith("@workspace/ui/");
@@ -90,9 +97,11 @@ function violation(source, specifier) {
     return "API must not depend on the web or UI";
   if (from.startsWith("packages/") && (toApi || toWeb))
     return "shared packages must not depend on applications";
+  if (relativeKey === ".private" || relativeKey.startsWith(".private/"))
+    return "public code must not depend on private implementations";
   if (
-    from.startsWith("packages/core/") &&
-    blockedCore.some((name) => specifier === name || specifier.startsWith(name))
+    (from.startsWith("packages/core/") || from.startsWith("packages/core-contracts/")) &&
+    (toUI || blockedCore.some((name) => specifier === name || specifier.startsWith(name)))
   )
     return "core must not depend on infrastructure or UI";
   if (/^@workspace\/[^/]+\/(?:src|dist)(?:\/|$)/.test(specifier))
@@ -128,7 +137,13 @@ function moduleProblem(source, node) {
     !target
   )
     return "runtime module imports must use a static specifier";
-  return target ? violation(source, target) : undefined;
+  const kind =
+    ts.isCallExpression(node) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === "require"
+      ? "require"
+      : "import";
+  return target ? violation(source, target, kind) : undefined;
 }
 
 async function files(dir) {
@@ -149,6 +164,18 @@ if (process.argv.includes("--self-test")) {
     ["apps/community-api/src/app.ts", "@workspace/ui", true],
     ["packages/ui/src/index.tsx", "../../../apps/community-api/src/auth", true],
     ["packages/core/src/index.ts", "mysql2/promise", true],
+    ["packages/core-contracts/src/index.ts", "mysql2/promise", true],
+    ["packages/core-contracts/src/index.ts", "express", true],
+    ["packages/core-contracts/src/index.ts", "../../ui/src/index.tsx", true],
+    ["packages/core-contracts/src/index.ts", "../../../.private/shuriva-cloud/src/main.js", true],
+    ["apps/community-web/src/App.tsx", "../../../.private/shuriva-cloud/src/main.js", true],
+    ["packages/core-contracts/src/index.ts", "zod", false],
+    ["packages/core-contracts/src/index.ts", "./read-payload.js", false],
+    ["packages/core-contracts/src/index.ts", "../../ui", true],
+    ["packages/core-contracts/src/index.ts", "../../../.private", true],
+    ["packages/core-contracts/src/index.ts", "../../x#y/../ui", true, "require"],
+    ["packages/core-contracts/src/index.ts", "../../../x#y/../.private/entry.cjs", true, "require"],
+    ["packages/core-contracts/src/index.ts", "../../x#y/../ui", false, "import"],
     ["apps/community-web/src/App.tsx", "@workspace/ui", false],
     ["apps/community-api/src/app.ts", "./auth.js", false],
     ["apps/community-web/src/App.tsx", "@workspace/ui/src/button", true],
@@ -184,8 +211,8 @@ if (process.argv.includes("--self-test")) {
     ["apps/community-api/src/mutations/store.ts", "../datasources/store.js", true],
     ["apps/community-api/src/mutations/store.ts", "../datasources/public.js", false],
   ];
-  for (const [from, target, expected] of cases)
-    if (Boolean(violation(from, target)) !== expected)
+  for (const [from, target, expected, kind] of cases)
+    if (Boolean(violation(from, target, kind)) !== expected)
       throw new Error(`Boundary rule failed: ${from} -> ${target}`);
   for (const [snippet, expected] of [
     [
@@ -211,6 +238,24 @@ if (process.argv.includes("--self-test")) {
       throw new Error(
         "Boundary scanner must reject template-literal imports of the private clock seam",
       );
+  }
+  for (const [snippet, expected] of [
+    ['require("../../x#y/../ui")', true],
+    ['require("../../../x#y/../.private/entry.cjs")', true],
+    ['import("../../x#y/../ui")', false],
+    ['require("./literal#name.cjs")', false],
+    ['require("./literal%23name.cjs")', false],
+  ]) {
+    const sample = ts.createSourceFile("sample.ts", snippet, ts.ScriptTarget.Latest, true);
+    const problems = [];
+    function inspectPath(node) {
+      const problem = moduleProblem("packages/core-contracts/src/index.ts", node);
+      if (problem) problems.push(problem);
+      ts.forEachChild(node, inspectPath);
+    }
+    inspectPath(sample);
+    if (problems.length > 0 !== expected)
+      throw new Error(`Module path semantics failed: ${snippet}`);
   }
   console.log("Boundary rule self-test passed.");
 } else {

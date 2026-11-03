@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"example.com/ai-database-workspace/connector/internal/agent"
+	"example.com/ai-database-workspace/connector/internal/datasource"
 	"example.com/ai-database-workspace/connector/internal/mutationguard"
 	"example.com/ai-database-workspace/connector/internal/mutationmysql"
 	"example.com/ai-database-workspace/connector/internal/mutationrunner"
@@ -38,6 +39,18 @@ func (v identityVault) Set(id string, value agent.KeyState) error { v[id] = valu
 func (v identityVault) Delete(id string) error                    { delete(v, id); return nil }
 
 type profiles map[string]mutationstore.Profile
+
+type readProfiles map[string]datasource.Profile
+
+func (p readProfiles) Get(id string) (datasource.Profile, error) {
+	v, ok := p[id]
+	if !ok {
+		return v, errors.New("missing isolated read profile")
+	}
+	return v, nil
+}
+func (p readProfiles) Set(v datasource.Profile) error { p[v.ID] = v; return nil }
+func (p readProfiles) Delete(id string) error         { delete(p, id); return nil }
 
 func (p profiles) Get(id string) (mutationstore.Profile, error) {
 	value, ok := p[id]
@@ -130,6 +143,7 @@ func run() error {
 	catalog := "stage8_g2_" + suffix
 	writer := mutationmysql.Account{User: "s8g2_" + suffix + "_writer", Host: "127.0.0.1"}
 	recovery := mutationmysql.Account{User: "s8g2_" + suffix + "_recover", Host: "127.0.0.1"}
+	reader := mutationmysql.Account{User: "s8g2_" + suffix + "_read", Host: "127.0.0.1"}
 	incarnation, _ := mutationmysql.NewEpoch()
 	generation, _ := mutationmysql.NewEpoch()
 	plan, err := mutationmysql.BuildInstallation(mutationmysql.InstallSpec{Catalog: catalog, Tables: []string{"orders"}, Writer: writer, Recovery: recovery, Incarnation: incarnation, Generation: generation})
@@ -144,7 +158,7 @@ func run() error {
 		for _, name := range []string{plan.ControlCatalog, catalog} {
 			_, _ = admin.ExecContext(cleanup, "DROP DATABASE IF EXISTS "+ident(name))
 		}
-		for _, user := range []mutationmysql.Account{writer, recovery, plan.Definer} {
+		for _, user := range []mutationmysql.Account{writer, recovery, reader, plan.Definer} {
 			_, _ = admin.ExecContext(cleanup, "DROP USER IF EXISTS "+account(user))
 		}
 	}()
@@ -199,6 +213,12 @@ func run() error {
 		return err
 	}
 	client.PlatformKey = config.PlatformPublicKey
+	if os.Getenv("STAGE9_G3_TEST") == "1" {
+		if exec("CREATE USER "+account(reader)+" IDENTIFIED BY '"+secret+"'") != nil || exec("GRANT SELECT, SHOW VIEW ON `"+strings.ReplaceAll(catalog, "_", `\_`)+"`.* TO "+account(reader)) != nil {
+			return errors.New("isolated reader unavailable")
+		}
+		client.SourceVault = readProfiles{input.SourceID: {ID: input.SourceID, ConnectorID: config.ConnectorID, WorkspaceIDs: []string{input.WorkspaceID}, Host: "127.0.0.1", Port: 13308, Database: catalog, Username: reader.User, Password: secret, TLS: "local", ReadScopes: map[string]map[string][]string{input.WorkspaceID: {"orders": {"id", "label", "amount", "tenant"}}}}}
+	}
 	platform := &agent.MutationPlatform{Client: client, ConnectorID: config.ConnectorID, Private: private}
 	manager, err := agent.NewLocalMutationSessions(ctx, agent.MutationSessionOptions{ConnectorID: config.ConnectorID, Directory: directory, Profiles: profiles{input.SourceID: profile}, Platform: platform, NamespaceRegistry: mutationstore.NewMemoryPackageNamespaces(), PackageKeys: func(string, string) (mutationstore.PackageKeyStore, error) { return packageKeys, nil }, Controller: func(p mutationstore.Profile, m mutationmysql.Manifest) (*mutationmysql.Controller, error) {
 		w, err := testmysql.OpenAccount(manifest, p.Writer.Username, p.Writer.Password, false)

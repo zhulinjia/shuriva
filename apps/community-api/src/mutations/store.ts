@@ -1,23 +1,23 @@
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
-import type { BoundSourceAccess } from "../datasources/public.js";
+import type { BoundSourceAccess, SourceBindingIdentity } from "../datasources/public.js";
 import {
   type ConfirmationInput,
+  executionBindingSchema,
   type MutationBinding,
   MutationError,
   type MutationExecution,
   type MutationExecutionBinding,
   type MutationPermit,
   type MutationPermitRequest,
+  type MutationReceiptSummary,
   type MutationScope,
   type MutationState,
   type PreviewMetadata,
-  executionBindingSchema,
-  type MutationReceiptSummary,
   previewMetadataSchema,
 } from "./model.js";
-import type { MutationAuditSink, MutationPermitSigner } from "./ports.js";
 import { checkOutcomeTransition, validateOutcome } from "./outcome.js";
+import type { MutationAuditSink, MutationPermitSigner } from "./ports.js";
 
 interface PreviewRow extends RowDataPacket {
   id: string;
@@ -144,17 +144,37 @@ export class MutationStore {
       ownerId: string,
       sessionId: string,
     ) => Promise<boolean>,
+    private readonly bindingIdentities = false,
   ) {}
   private scoped<T>(
     scope: MutationScope,
-    action: (connection: PoolConnection) => Promise<T>,
+    action: (connection: PoolConnection, binding: SourceBindingIdentity) => Promise<T>,
   ): Promise<T> {
     return this.sources.withBoundSnapshot(
       scope.ownerId,
       scope.workspaceId,
       scope.sourceId,
-      (connection) => action(connection),
+      (connection, _snapshot, binding) => action(connection, binding),
     );
+  }
+  private async assertPreviewBinding(
+    c: PoolConnection,
+    scope: MutationScope,
+    previewId: string,
+    current: SourceBindingIdentity,
+  ) {
+    if (!this.bindingIdentities) throw new MutationError("UNAVAILABLE");
+    const [rows] = await c.execute<RowDataPacket[]>(
+      "SELECT generation FROM mutation_preview_binding WHERE previewId=? FOR UPDATE",
+      [previewId],
+    );
+    if (!current.bindingGeneration || rows[0]?.generation !== current.bindingGeneration)
+      throw new MutationError("DENIED");
+    const [preview] = await c.execute<RowDataPacket[]>(
+      "SELECT connectorId FROM mutation_preview WHERE id=? AND ownerId=? AND workspaceId=? AND sourceId=?",
+      [previewId, ...scopeValues(scope)],
+    );
+    if (preview[0]?.connectorId !== current.connectorId) throw new MutationError("DENIED");
   }
   private async lock(c: PoolConnection, scope: MutationScope, create = false): Promise<void> {
     if (create)
@@ -212,6 +232,7 @@ export class MutationStore {
     );
   }
   async savePreview(binding: MutationBinding, input: PreviewMetadata): Promise<void> {
+    if (!this.bindingIdentities) throw new MutationError("UNAVAILABLE");
     const p = previewMetadataSchema.parse(input);
     if (
       p.apiBoot !== this.apiBoot ||
@@ -220,7 +241,14 @@ export class MutationStore {
     )
       throw new MutationError("EXPIRED");
     try {
-      await this.scoped(binding, async (c) => {
+      await this.scoped(binding, async (c, current) => {
+        if (
+          !binding.bindingGeneration ||
+          !current.bindingGeneration ||
+          current.bindingGeneration !== binding.bindingGeneration ||
+          current.connectorId !== binding.connectorId
+        )
+          throw new MutationError("DENIED");
         await this.lock(c, binding, true);
         await this.target(c, p.targetIdentity, true);
         await c.execute(
@@ -243,6 +271,10 @@ export class MutationStore {
             new Date(p.expiresAt),
           ],
         );
+        await c.execute("INSERT INTO mutation_preview_binding(previewId,generation) VALUES(?,?)", [
+          p.previewId,
+          current.bindingGeneration,
+        ]);
       });
     } catch (error) {
       conflict(error);
@@ -254,8 +286,9 @@ export class MutationStore {
     input: ConfirmationInput,
   ): Promise<{ execution: MutationExecution; created: boolean }> {
     try {
-      return await this.scoped(binding, async (c) => {
+      return await this.scoped(binding, async (c, current) => {
         await this.lock(c, binding);
+        await this.assertPreviewBinding(c, binding, input.previewId, current);
         const [prior] = await c.execute<ConfirmationRow[]>(
           "SELECT * FROM mutation_confirmation WHERE id=? FOR UPDATE",
           [input.confirmationId],
@@ -497,9 +530,10 @@ export class MutationStore {
     });
   }
   async claim(scope: MutationScope, submitted: MutationExecutionBinding): Promise<void> {
-    await this.scoped(scope, async (c) => {
+    await this.scoped(scope, async (c, current) => {
       await this.lock(c, scope);
       const record = await this.getWith(c, scope, submitted.executionId, true);
+      await this.assertPreviewBinding(c, scope, record.previewId, current);
       if (
         !matchesBinding(record, submitted) ||
         record.apiBoot !== this.apiBoot ||
@@ -521,9 +555,10 @@ export class MutationStore {
     request: MutationPermitRequest,
     signer: MutationPermitSigner,
   ): Promise<MutationPermit> {
-    return this.scoped(scope, async (c) => {
+    return this.scoped(scope, async (c, current) => {
       await this.lock(c, scope);
       const record = await this.getWith(c, scope, request.executionId, true);
+      await this.assertPreviewBinding(c, scope, record.previewId, current);
       if (
         !matchesBinding(record, request) ||
         record.apiBoot !== this.apiBoot ||

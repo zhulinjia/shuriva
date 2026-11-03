@@ -9,6 +9,82 @@ import { mountMutationRoutes } from "../src/mutations/routes.js";
 import { MutationService } from "../src/mutations/service.js";
 import { mutationFixture } from "./mutation-fixture.js";
 
+test("missing binding migration preserves authenticated read and recovery without granting any new write", {
+  skip: process.env.STAGE8_G3_TEST !== "1",
+}, async () => {
+  const f = await mutationFixture({ bindingIdentities: false });
+  const app = express();
+  let dispatches = 0;
+  const access: MutationAccess = {
+    authenticate: async (headers) =>
+      headers.cookie === "isolated-session"
+        ? { ownerId: f.binding.ownerId, sessionId: f.sessionId }
+        : undefined,
+    withScope: async (scope, work) => {
+      if (
+        scope.ownerId !== f.binding.ownerId ||
+        scope.workspaceId !== f.binding.workspaceId ||
+        scope.sourceId !== f.binding.sourceId
+      )
+        throw new MutationError("NOT_FOUND");
+      return work(f.binding);
+    },
+  };
+  const service = new MutationService(
+    f.store,
+    access,
+    {
+      capability: async () =>
+        assert.fail("missing identity must not ask Connector for write capability"),
+      preview: async () => assert.fail("missing identity must not dispatch preview"),
+      execute: async () => {
+        dispatches++;
+      },
+      status: async () => ({ state: "outcome_unknown", code: "isolated" }),
+      cancel: async () => {},
+    },
+    { sign: async () => assert.fail("no permit") },
+    { enabled: true, executionEnabled: false },
+  );
+  const origin = "http://127.0.0.1:5199";
+  mountMutationRoutes(app, origin, access, service);
+  const server = app.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}/api/mutations/${f.binding.workspaceId}/${f.binding.sourceId}`;
+  const get = { headers: { cookie: "isolated-session" } };
+  const post = (body: unknown) => ({
+    method: "POST",
+    headers: { cookie: "isolated-session", origin, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  try {
+    const capability = await (await fetch(`${base}/capability`, get)).json();
+    assert.equal(capability.enabled, true);
+    assert.equal(capability.available, false);
+    assert.equal(capability.executionEnabled, false);
+    assert.equal(capability.code, "binding_identity_required");
+    assert.equal((await fetch(`${base}/executions`, get)).status, 200);
+    assert.equal((await fetch(`${base}/confirmations/${randomUUID()}`, get)).status, 200);
+    assert.equal((await fetch(`${base}/recovery`, post({}))).status, 200);
+    assert.equal((await fetch(`${base}/executions/${randomUUID()}`, get)).status, 404);
+    const plan = {
+      operation: "delete",
+      table: "customers",
+      where: [{ column: "id", operator: "eq", value: { kind: "integer", value: "1" } }],
+    };
+    assert.equal((await fetch(`${base}/previews`, post({ plan }))).status, 503);
+    assert.equal(dispatches, 0);
+    assert.equal((await fetch(`${base}/executions`)).status, 401);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await f.close();
+  }
+});
+
 test("mutation HTTP checks authentication, Origin, strict inputs and preserves IDs through recovery", {
   skip: process.env.STAGE8_G3_TEST !== "1",
 }, async () => {

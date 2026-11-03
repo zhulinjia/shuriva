@@ -1,3 +1,4 @@
+import { validReadQueryResult as validResult } from "@shuriva/core-contracts";
 import { createHmac, randomBytes } from "node:crypto";
 import { decodeModelSchema } from "../ai/public.js";
 import type { ReadCancel, ReadTask } from "../protocol/read-task.js";
@@ -77,65 +78,41 @@ function validatedDelegation(delegatedScope: unknown): Record<string, string[]> 
   return validated;
 }
 
-function validResult(value: unknown, maxRows: number): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const data = value as Record<string, unknown>;
+/** Validate the exact delegated signed-task budget before human approval. */
+export function validateDelegatedRead(
+  input: {
+    sql: string;
+    parameters: Array<{ kind: string; value: string }>;
+    maxRows: number;
+    schemaVersion: string | null;
+  },
+  tables: unknown,
+): void {
+  const delegatedScope = validatedDelegation(tables);
   if (
-    Object.keys(data).some(
-      (key) => !["columns", "rows", "timezone", "truncated", "reason"].includes(key),
-    ) ||
-    data.timezone !== "UTC" ||
-    typeof data.truncated !== "boolean" ||
-    !Array.isArray(data.columns) ||
-    data.columns.length < 1 ||
-    data.columns.length > 256 ||
-    !Array.isArray(data.rows) ||
-    data.rows.length > maxRows ||
-    (data.truncated
-      ? !["rows", "bytes", "cell"].includes(String(data.reason))
-      : data.reason !== undefined)
+    Buffer.byteLength(input.sql) < 1 ||
+    Buffer.byteLength(input.sql) > 16384 ||
+    input.parameters.length > 64 ||
+    input.parameters.some((p) => !kinds.has(p.kind) || Buffer.byteLength(p.value) > 4096) ||
+    !Number.isInteger(input.maxRows) ||
+    input.maxRows < 1 ||
+    input.maxRows > 1000 ||
+    (input.schemaVersion !== null && !/^[0-9a-f]{64}$/.test(input.schemaVersion))
   )
-    return false;
+    throw new Error("INVALID");
   if (
-    !data.columns.every((column: unknown) => {
-      if (!column || typeof column !== "object" || Array.isArray(column)) return false;
-      const item = column as Record<string, unknown>;
-      return (
-        Object.keys(item).length === 2 &&
-        typeof item.name === "string" &&
-        /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(item.name) &&
-        typeof item.type === "string" &&
-        item.type.length > 0 &&
-        item.type.length <= 64
-      );
-    })
-  )
-    return false;
-  return data.rows.every(
-    (row: unknown) =>
-      Array.isArray(row) &&
-      row.length === (data.columns as unknown[]).length &&
-      row.every((cell: unknown) => {
-        if (!cell || typeof cell !== "object" || Array.isArray(cell)) return false;
-        const item = cell as Record<string, unknown>;
-        if (Object.keys(item).some((key) => !["null", "encoding", "value"].includes(key)))
-          return false;
-        if (item.null === true) return Object.keys(item).length === 1;
-        if (
-          item.null !== false ||
-          !["text", "base64"].includes(String(item.encoding)) ||
-          (item.value !== undefined && typeof item.value !== "string")
-        )
-          return false;
-        const content = (item.value ?? "") as string;
-        if (item.encoding === "text") return Buffer.byteLength(content) <= 32768;
-        if (!/^[A-Za-z0-9+/]*={0,2}$/.test(content)) return false;
-        const bytes = Buffer.from(content, "base64");
-        return bytes.length <= 32768 && bytes.toString("base64") === content;
+    Buffer.from(
+      JSON.stringify({
+        sql: input.sql,
+        parameters: input.parameters,
+        maxRows: input.maxRows,
+        schemaVersion: input.schemaVersion,
+        delegatedScope,
       }),
-  );
+    ).toString("base64url").length > 32768
+  )
+    throw new Error("INVALID");
 }
-
 /** Bounded, ephemeral task storage. Callers must authenticate and recheck scope. */
 export class ReadJobs {
   private readonly jobs = new Map<string, Job>();
@@ -158,7 +135,7 @@ export class ReadJobs {
   ): { state: ExecutionState; summary: ExecutionSummary } | null {
     this.prune();
     const job = this.find(scope, id);
-    if (job?.operation !== "read_query") return null;
+    if (!job) return null;
     const outcome = job.executionOutcome;
     return outcome
       ? { state: outcome.state, summary: { ...outcome.summary } }
@@ -184,9 +161,17 @@ export class ReadJobs {
   }
 
   /** Result disposal and later authorization changes must not rewrite execution history. */
-  private finishExecution(job: Job, state: ExecutionState, summary: ExecutionSummary = {}): void {
-    if (job.operation === "read_query" && !job.executionOutcome)
-      job.executionOutcome = { state, summary: { ...summary } };
+  private finishExecution(
+    job: Job,
+    state: ExecutionState,
+    summary: ExecutionSummary = {},
+    cause: "lifecycle" | "verified-result" = "lifecycle",
+  ): void {
+    if (!job.executionOutcome)
+      job.executionOutcome =
+        cause === "lifecycle" && job.dispatched
+          ? { state: "outcome_unknown", summary: { code: "outcome_unknown" } }
+          : { state, summary: { ...summary } };
   }
 
   create(
@@ -268,6 +253,16 @@ export class ReadJobs {
         throw new Error("INVALID");
       params.push({ kind: item.kind as Parameter["kind"], value: item.value });
     }
+    if (delegatedScope)
+      validateDelegatedRead(
+        {
+          sql,
+          parameters: params,
+          maxRows: Number(maxRows),
+          schemaVersion: typeof schemaVersion === "string" ? schemaVersion : null,
+        },
+        Object.entries(delegatedScope),
+      );
     const payload = Buffer.from(
       JSON.stringify({
         sql,
@@ -619,6 +614,7 @@ export class ReadJobs {
       job,
       summary.code === "outcome_unknown" ? "outcome_unknown" : job.state,
       summary,
+      "verified-result",
     );
     return true;
   }

@@ -29,6 +29,9 @@ export const operationalMessages = {
   APP_ORIGIN_INSECURE: "APP_ORIGIN must use HTTPS except on localhost",
   API_HOST_INVALID: "API_HOST must be a loopback address until external deployment is hardened",
   API_PORT_INVALID: "API_PORT must be an integer between 1 and 65535",
+  WEB_ASSETS_INVALID:
+    "WEB_ASSETS_DIR must identify a complete, bounded, unlinked web build directory",
+  WEB_ORIGIN_INVALID: "Built web assets require APP_ORIGIN to match the local API listener origin",
   STAGE3_FLAG_INVALID: "ENABLE_STAGE3_DATASOURCES must be 0 or 1",
   STAGE4_FLAG_INVALID: "ENABLE_STAGE4_READS must be 0 or 1",
   STAGE4_DEPENDENCY: "ENABLE_STAGE4_READS requires ENABLE_STAGE3_DATASOURCES=1",

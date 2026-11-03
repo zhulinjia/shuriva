@@ -57,3 +57,9 @@ export function readApiConfig(env: NodeJS.ProcessEnv): ApiConfig {
 
   return { host, port };
 }
+
+export function validateWebOrigin(origin: string | undefined, listener: ApiConfig): void {
+  const hostname = listener.host.includes(":") ? `[${listener.host}]` : listener.host;
+  if (!origin || origin !== new URL(`http://${hostname}:${listener.port}`).origin)
+    throw new OperationalError("WEB_ORIGIN_INVALID");
+}

@@ -75,8 +75,8 @@ func RunWithContext(ctx context.Context, args []string, stdin *os.File, stdout, 
 			fmt.Fprintf(stdout, "Pairing: configured\nConnector ID: %s\nName: %s\nServer: %s\n", cfg.ConnectorID, cfg.Name, cfg.Server)
 		}
 		fmt.Fprintln(stdout, "Connectivity: shown while running or in the workspace")
-		fmt.Fprintln(stdout, "Database connection: local metadata checks only")
-		fmt.Fprintln(stdout, "Query and write execution: disabled")
+		fmt.Fprintln(stdout, "Read-only queries: signed platform tasks with platform and local authorization")
+		fmt.Fprintln(stdout, "Runtime writes: disabled")
 		return 0
 	case "version", "--version":
 		if len(rest) != 0 {
@@ -88,9 +88,9 @@ func RunWithContext(ctx context.Context, args []string, stdin *os.File, stdout, 
 		fmt.Fprintln(stdout, "Usage: connector [status|version|pair|run|rotate|reset|source|write|help]")
 		fmt.Fprintln(stdout, "pair --server <origin> --name <name>; pairing code is read securely from the terminal.")
 		fmt.Fprintln(stdout, "source add configures a local MySQL credential; source check verifies its scope and metadata.")
-		fmt.Fprintln(stdout, "source read-allow/read-revoke manage local table and column policy; SQL execution remains disabled.")
-		fmt.Fprintln(stdout, "SQL query and write execution are not available.")
-		fmt.Fprintln(stdout, "write plan-install generates offline reviewed SQL; write capture-configure requires an interactive terminal and never installs database objects. Runtime writes remain disabled until G4.")
+		fmt.Fprintln(stdout, "source read-allow/read-revoke manage local table and column policy; read-only queries also require platform authorization and SQL validation.")
+		fmt.Fprintln(stdout, "run accepts authorized signed read-only tasks when enabled on the platform. Runtime writes are disabled.")
+		fmt.Fprintln(stdout, "write plan-install generates offline reviewed SQL; write capture-configure requires an interactive terminal and never installs database objects.")
 		return 0
 	case "pair":
 		flags := flag.NewFlagSet("pair", flag.ContinueOnError)

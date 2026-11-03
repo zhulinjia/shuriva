@@ -17,6 +17,9 @@ coverage/
 packages/storage-prisma/src/generated/
 .runtime/
 
+# Independent local private repositories; never include Cloud implementation in Public.
+/.private/
+
 # Local credentials and private key material. Public test fixtures need an explicit exception.
 *.pem
 *.key

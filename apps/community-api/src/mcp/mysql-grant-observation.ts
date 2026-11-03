@@ -6,6 +6,7 @@ type SessionDeadline = (
   connection: PoolConnection,
   ownerId: string,
   sessionId: string,
+  assertActive?: () => void,
 ) => Promise<number | undefined>;
 
 interface GrantRow extends RowDataPacket {
@@ -34,6 +35,7 @@ export function mysqlMcpGrantObservation(
   // SDK. Keep its slot until it actually settles, preventing an unbounded queue.
   let outstanding = 0;
   return {
+    health: () => ({ outstanding, capacity: 8, available: outstanding < 8 }),
     async observe(tokenHash, decide) {
       if (!/^[0-9a-f]{64}$/.test(tokenHash)) return false;
       if (outstanding >= 8) throw new Error("MCP_GRANT_CAPACITY");
@@ -41,10 +43,12 @@ export function mysqlMcpGrantObservation(
       const deadline = performance.now() + lockDeadlineMs;
       let connection: PoolConnection | undefined;
       let expired = false;
+      const lease = new AbortController();
       let destroyed = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const expire = () => {
         expired = true;
+        lease.abort();
         if (connection && !destroyed) {
           destroyed = true;
           try {
@@ -108,10 +112,48 @@ export function mysqlMcpGrantObservation(
             };
           }
           const sessionExpiresAt = grant
-            ? await sessionDeadline(connection, grant.ownerId, grant.approvalSessionId)
+            ? await sessionDeadline(
+                connection,
+                grant.ownerId,
+                grant.approvalSessionId,
+                checkDeadline,
+              )
             : undefined;
           checkDeadline();
-          const accepted = await decide({ grant, sessionExpiresAt });
+          const lockedConnection = connection;
+          const accepted = await decide({
+            grant,
+            sessionExpiresAt,
+            assertActive: checkDeadline,
+            signal: lease.signal,
+            acknowledgeHandoff: async (input) => {
+              checkDeadline();
+              if (
+                !grant ||
+                input.ownerId !== grant.ownerId ||
+                input.grantId !== grant.id ||
+                input.generation !== grant.generation
+              )
+                return false;
+              // COMMIT can complete after the client times out or loses the
+              // connection. A lock-only receipt check leaves durable outcome
+              // unknown even if transaction completion cannot be observed.
+              const [result] = await lockedConnection.execute<RowDataPacket[]>(
+                "SELECT id FROM mcp_invocation WHERE ownerId=? AND id=? AND grantId=? AND generation=? AND commitment=? AND bootId=? AND approvalSessionId=? AND tool='change_propose' AND state='handoff_unknown' AND expiresAt>UTC_TIMESTAMP(3) FOR UPDATE",
+                [
+                  input.ownerId,
+                  input.id,
+                  input.grantId,
+                  input.generation,
+                  input.commitment,
+                  input.bootId,
+                  input.sessionId,
+                ],
+              );
+              checkDeadline();
+              return result.length === 1;
+            },
+          });
           checkDeadline();
           await connection.commit();
           checkDeadline();
@@ -131,6 +173,7 @@ export function mysqlMcpGrantObservation(
           }
           throw error;
         } finally {
+          lease.abort();
           try {
             if (connection && !destroyed) connection.release();
           } finally {

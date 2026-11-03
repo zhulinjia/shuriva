@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto";
+import type { IncomingHttpHeaders } from "node:http";
 import { betterAuth } from "better-auth";
 import { createAuthMiddleware, getSession } from "better-auth/api";
-import { username } from "better-auth/plugins";
 import { fromNodeHeaders } from "better-auth/node";
-import type { IncomingHttpHeaders } from "node:http";
-import type { Pool, PoolConnection, RowDataPacket } from "mysql2/promise";
-import { diagnostics } from "./logging/public.js";
-import { databaseConnectionOptions } from "./auth/database.js";
-import { OperationalError } from "./operational-error.js";
+import { username } from "better-auth/plugins";
+import type { ExecuteValues, FieldPacket, Pool, QueryResult, RowDataPacket } from "mysql2/promise";
 import { credentialTransactions, transactionalEndpoint } from "./auth/credential-transaction.js";
+import { databaseConnectionOptions } from "./auth/database.js";
 import { AuthRequestError, prepareAuthRequest } from "./auth/http-request.js";
+import { diagnostics } from "./logging/public.js";
+import { OperationalError } from "./operational-error.js";
+
 export { createDatabase } from "./auth/database.js";
 export { authSessionAccess } from "./auth/session-access.js";
 
@@ -192,8 +193,11 @@ export function authMutationIdentity(auth: Auth) {
 }
 
 /** Called inside the authorization transaction; Better Auth session deletion waits for this lock. */
+type AuthSessionTransaction = {
+  execute<T extends QueryResult>(sql: string, values: ExecuteValues[]): Promise<[T, FieldPacket[]]>;
+};
 export async function authSessionReferenceActive(
-  transaction: PoolConnection,
+  transaction: AuthSessionTransaction,
   ownerId: string,
   sessionId: string,
 ): Promise<boolean> {
@@ -203,7 +207,7 @@ export async function authSessionReferenceActive(
 /** Auth-owned expiry proof for callers that must await further work/commit.
  * The row remains shared-locked on the caller's transaction connection. */
 export async function authSessionReferenceDeadline(
-  transaction: PoolConnection,
+  transaction: AuthSessionTransaction,
   ownerId: string,
   sessionId: string,
 ): Promise<number | undefined> {

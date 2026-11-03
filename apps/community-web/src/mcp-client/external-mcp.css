@@ -1,0 +1,145 @@
+.external-layout {
+  max-width: 1280px;
+  margin: auto;
+  padding: 32px;
+  color: var(--foreground, #172033);
+}
+.external-heading,
+.external-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.external-heading h1 {
+  margin: 0 0 8px;
+  font-size: 26px;
+  font-weight: 700;
+}
+.external-layout h2 {
+  margin: 12px 0;
+  font-size: 19px;
+  font-weight: 600;
+}
+.external-layout h3,
+.external-layout h4 {
+  margin: 16px 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.external-notice,
+.external-review {
+  border: 1px solid #e4c67b;
+  border-radius: 10px;
+  padding: 16px;
+  background: #fffaf0;
+  color: #553d11;
+}
+.external-columns {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 28px;
+  margin-top: 24px;
+}
+.external-columns aside {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.external-layout label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+.external-layout input,
+.external-layout select,
+.external-layout textarea {
+  width: 100%;
+  padding: 9px;
+  border: 1px solid #c7d1df;
+  border-radius: 6px;
+  background: var(--background, #fff);
+  color: inherit;
+}
+.external-layout input[type="checkbox"] {
+  width: auto;
+}
+.external-layout pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 420px;
+  overflow: auto;
+  padding: 14px;
+  background: #f2f5fa;
+  color: #192238;
+  border-radius: 8px;
+}
+.external-layout small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.external-layout details,
+.external-call {
+  margin: 18px 0;
+}
+.external-editor {
+  border-top: 1px solid #dce3ec;
+  padding-top: 12px;
+}
+.external-tools article,
+.external-calls li {
+  padding: 12px 0;
+  border-bottom: 1px solid #dce3ec;
+}
+.external-calls {
+  list-style: none;
+  padding: 0;
+}
+.external-calls li {
+  display: grid;
+  gap: 7px;
+}
+.external-layout [role="alert"] {
+  color: #a12824;
+}
+.external-layout button {
+  margin: 3px;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid #c7d1df;
+  border-radius: 7px;
+  background: #fff;
+  font-weight: 500;
+}
+.external-layout button:not(:disabled):hover {
+  border-color: var(--accent);
+  background: #f1f4ff;
+}
+.external-layout button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: #eef2ff;
+  color: #344ca0;
+}
+.external-layout button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.external-layout a {
+  display: inline-block;
+  margin: 10px;
+}
+.external-layout p {
+  line-height: 1.6;
+}
+.external-layout fieldset {
+  min-width: 0;
+}
+@media (max-width: 800px) {
+  .external-columns {
+    grid-template-columns: 1fr;
+  }
+  .external-layout {
+    padding: 20px;
+  }
+}

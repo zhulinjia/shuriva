@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import type {
+  ExecuteValues,
+  FieldPacket,
+  Pool,
+  PoolConnection,
+  QueryResult,
+  ResultSetHeader,
+  RowDataPacket,
+} from "mysql2/promise";
 
 interface WorkspaceRow extends RowDataPacket {
   id: string;
@@ -8,6 +16,23 @@ interface WorkspaceRow extends RowDataPacket {
   createdAt: Date;
   updatedAt: Date;
   archivedAt: Date | null;
+}
+/** Public infrastructure port: callers retain this lock while admitting work. */
+export async function workspaceReferenceActive(
+  connection: {
+    execute<T extends QueryResult>(
+      sql: string,
+      values: ExecuteValues[],
+    ): Promise<[T, FieldPacket[]]>;
+  },
+  owner: string,
+  id: string,
+) {
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    "SELECT id FROM workspace WHERE id=? AND createdByAccountId=? AND archivedAt IS NULL FOR SHARE",
+    [id, owner],
+  );
+  return rows.length === 1;
 }
 export function workspaceName(input: unknown): string | undefined {
   if (!input || typeof input !== "object" || !("name" in input) || typeof input.name !== "string")
@@ -23,6 +48,13 @@ export class WorkspaceStore {
       workspaceId: string,
     ) => Promise<void>,
   ) {}
+  async active(owner: string, id: string) {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT id FROM workspace WHERE id=? AND createdByAccountId=? AND archivedAt IS NULL",
+      [id, owner],
+    );
+    return rows.length === 1;
+  }
   async list(ownerId: string, archived: boolean, after?: string) {
     const condition = archived ? "IS NOT NULL" : "IS NULL";
     const [rows] = await this.pool.execute<WorkspaceRow[]>(

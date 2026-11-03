@@ -1,4 +1,3 @@
-import { testSessions } from "./session-fixture.js";
 import assert from "node:assert/strict";
 import {
   createHash,
@@ -31,6 +30,7 @@ import type { MutationAccess, MutationTransport } from "../src/mutations/ports.j
 import { MutationService } from "../src/mutations/service.js";
 import { ReadService } from "../src/queries/service.js";
 import { mutationFixture } from "./mutation-fixture.js";
+import { testSessions } from "./session-fixture.js";
 
 const integration = { skip: process.env.STAGE8_G3_TEST !== "1", timeout: 30_000 };
 function identity() {
@@ -110,7 +110,7 @@ async function identityFixture() {
             scope.sourceId,
           );
           if (!source) throw new MutationError("NOT_FOUND");
-          return action({ ...scope, connectorId: source.connectorId });
+          return action({ ...scope, ...source });
         });
       },
     };
@@ -149,7 +149,10 @@ async function identityFixture() {
       });
       const e = found.execution;
       return executionBindingSchema.parse({
-        ...f.binding,
+        ownerId: f.binding.ownerId,
+        workspaceId: f.binding.workspaceId,
+        sourceId: f.binding.sourceId,
+        connectorId: f.binding.connectorId,
         executionId: e.executionId,
         previewId: e.previewId,
         commitment: e.commitment,
@@ -165,7 +168,10 @@ async function identityFixture() {
     const message = (kind: "claim" | "permit", payload: unknown, key = active): MutationMessage => {
       const now = Math.floor(Date.now() / 1000);
       const value: MutationMessage = {
-        ...f.binding,
+        ownerId: f.binding.ownerId,
+        workspaceId: f.binding.workspaceId,
+        sourceId: f.binding.sourceId,
+        connectorId: f.binding.connectorId,
         id: randomUUID(),
         kind,
         operation: "execute",

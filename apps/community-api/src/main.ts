@@ -8,8 +8,13 @@ import {
   readStage6Enabled,
   readStage7Enabled,
   readStage8Enabled,
+  validateWebOrigin,
 } from "./config.js";
 import { apiPackageRoot } from "./package-path.js";
+import { readMcpConfig } from "./mcp/runtime.js";
+import { readExternalConfig } from "./mcp-client/config.js";
+import type { Express } from "express";
+import { mountWebAssets } from "./web-assets.js";
 import {
   createDiagnosticRuntime,
   createDiagnosticLogger,
@@ -26,6 +31,10 @@ async function bootstrap(): Promise<void> {
     await withDiagnostics(runtime.logger, {}, async () => {
       const { host, port } = readApiConfig(process.env);
       const auth = readAuthConfig(process.env);
+      const webDirectory = process.env.WEB_ASSETS_DIR?.trim();
+      if (webDirectory) {
+        validateWebOrigin(auth?.origin, { host, port });
+      }
       const connectorStatePath =
         process.env.CONNECTOR_STATE_PATH?.trim() ||
         resolve(apiPackageRoot(), ".runtime", "connectors.json");
@@ -40,6 +49,13 @@ async function bootstrap(): Promise<void> {
         stage6Enabled: readStage6Enabled(process.env),
         stage7Enabled: readStage7Enabled(process.env),
         stage8Enabled: readStage8Enabled(process.env),
+        mcpConfig: readMcpConfig(process.env),
+        externalMcpConfig: readExternalConfig(
+          process.env,
+          auth?.origin ?? "",
+          port,
+          readMcpConfig(process.env)?.port,
+        ),
       });
       let stopping: Promise<void> | undefined;
       const shutdown = () => {
@@ -62,6 +78,12 @@ async function bootstrap(): Promise<void> {
       process.once("SIGINT", shutdown);
       process.once("SIGTERM", shutdown);
       try {
+        if (webDirectory && auth)
+          await mountWebAssets(
+            app.getHttpAdapter().getInstance() as Express,
+            webDirectory,
+            auth.origin,
+          );
         await app.listen(port, host);
       } catch (error) {
         await app.close();

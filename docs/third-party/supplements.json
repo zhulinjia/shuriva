@@ -1,0 +1,32 @@
+{
+  "format": "shuriva-license-supplements-v1",
+  "components": [
+    {
+      "ecosystem": "npm",
+      "name": "@ai-sdk/provider-utils",
+      "version": "5.0.66",
+      "license": "Apache-2.0",
+      "file": "notices/provider-utils-5.0.66.LICENSE",
+      "sha256": "b4f9adb7c568904834d0dd6cc98d16c390d21ca32fc17ae7a267715269bd5529",
+      "source": "https://github.com/vercel/ai/blob/401cadc4e6743ebc000ef5bbb54d84f6a201b1db/LICENSE"
+    },
+    {
+      "ecosystem": "npm",
+      "name": "@tokenizer/token",
+      "version": "0.3.0",
+      "license": "MIT",
+      "file": "notices/tokenizer-token-0.3.0.LICENSE",
+      "sha256": "e4cc8c62601e996329682a022d66d3d4d5b8b21e08f5cc9b19de21cbcc2ecdc6",
+      "source": "https://github.com/Borewit/tokenizer-token/blob/e068a455370090f44c757946b8571bb3fb1f117e/README.md"
+    },
+    {
+      "ecosystem": "npm",
+      "name": "@koromix/koffi-win32-x64",
+      "version": "3.3.6",
+      "license": "MIT",
+      "file": "notices/koffi-win32-x64-3.3.6.LICENSE",
+      "sha256": "22bcbbbacd739b026a8dc484f62a31484ce4c4e31f3408b60b29b4e41d62b290",
+      "source": "https://codeberg.org/Koromix/rygel/src/commit/1a894d9e1d5041c25d4cd31c93a345a5a77cb1a2/src/koffi/LICENSE.txt"
+    }
+  ]
+}

@@ -133,6 +133,17 @@ export function createApprovalHandoffCore(
     return { m, w };
   };
   return {
+    commitment(binding: ApprovalBinding, payload: Buffer): string {
+      if (
+        closed ||
+        !valid(binding) ||
+        !Buffer.isBuffer(payload) ||
+        payload.length < 1 ||
+        payload.length > MAX_ITEM_BYTES
+      )
+        throw new Error("MCP_HANDOFF_INVALID");
+      return digest(secret, binding, payload).toString("hex");
+    },
     stage(binding: ApprovalBinding, payload: Buffer): { commitment: string; discard: () => void } {
       if (closed) throw new Error("MCP_HANDOFF_CLOSED");
       if (
@@ -217,6 +228,17 @@ export function createApprovalHandoffCore(
       const result = Buffer.from(entry.payload);
       remove(binding.requestId);
       return result;
+    },
+    inspect(binding: ApprovalBinding, expectedCommitment: string): Buffer | null {
+      if (closed || !valid(binding) || !/^[0-9a-f]{64}$/.test(expectedCommitment)) return null;
+      sweep();
+      const entry = entries.get(binding.requestId);
+      if (!entry) return null;
+      const claimed = Buffer.from(expectedCommitment, "hex");
+      const actual = digest(secret, binding, entry.payload);
+      return timingSafeEqual(entry.commitment, claimed) && timingSafeEqual(entry.commitment, actual)
+        ? Buffer.from(entry.payload)
+        : null;
     },
     size(): number {
       return entries.size;

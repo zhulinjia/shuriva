@@ -54,7 +54,12 @@ export async function until<T>(
 }
 /** Owns only children, directories and schemas allocated by this isolated fixture. */
 export async function g4Runtime(
-  options: { directoryUnavailable?: boolean; probeUnavailable?: boolean } = {},
+  options: {
+    directoryUnavailable?: boolean;
+    probeUnavailable?: boolean;
+    mcp?: boolean;
+    mcpChangeDrafts?: boolean;
+  } = {},
 ) {
   assert.equal(process.env.STAGE8_G4_ACCEPTANCE, "1");
   const fixture = await mutationFixture({ completeSchema: true });
@@ -77,6 +82,8 @@ export async function g4Runtime(
     origin,
     port: 43129,
     ...fixture.binding,
+    mcp: options.mcp,
+    mcpChangeDrafts: options.mcpChangeDrafts,
   };
   let child: ChildProcess | undefined;
   let probe: ReturnType<typeof spawn> | undefined;
@@ -123,6 +130,8 @@ export async function g4Runtime(
     apiLife = completion(child);
     apiFailed = false;
     child.stderr?.on("data", (chunk) => {
+      const fatal = String(chunk).match(/G4_FATAL_[A-Z0-9_]+/g);
+      if (fatal?.length) apiCloseStage = fatal[fatal.length - 1] ?? "unknown";
       const stages = String(chunk).match(/G4_CLOSE_[A-Z_]+/g);
       if (stages?.length) apiCloseStage = stages[stages.length - 1] ?? "unknown";
     });
@@ -130,11 +139,16 @@ export async function g4Runtime(
       "message",
       (message: {
         ready?: boolean;
+        configurationReady?: boolean;
         id?: number;
         barrier?: string;
         error?: string;
         result?: unknown;
       }) => {
+        if (message.configurationReady) {
+          child?.send(config);
+          return;
+        }
         if (message.ready) ready = true;
         if (message.id !== undefined) replies.set(message.id, message);
         if (message.barrier) barriers.push(message.barrier);
@@ -143,9 +157,12 @@ export async function g4Runtime(
     child.on("error", () => {
       apiFailed = true;
     });
-    child.send(config);
     await until(async () => {
-      assert.equal(apiFailed || apiLife?.finished, false, "isolated API failed to start or exited");
+      assert.equal(
+        apiFailed || apiLife?.finished,
+        false,
+        `isolated API failed to start or exited: ${apiCloseStage}`,
+      );
       return ready || undefined;
     });
   }
@@ -322,6 +339,8 @@ export async function g4Runtime(
       password,
       json,
       request,
+      cookie: () => cookie,
+      catalog: () => catalog,
       command,
       observe,
       probeEvents,
@@ -387,7 +406,11 @@ export async function g4Runtime(
       close,
     };
   } catch (error) {
-    await close();
+    try {
+      await close();
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], "G4 initialization and owned cleanup failed");
+    }
     throw error;
   }
 }

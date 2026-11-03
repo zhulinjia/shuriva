@@ -1,0 +1,134 @@
+.mcp-layout {
+  max-width: 1160px;
+  margin: auto;
+  padding: 32px 24px;
+  color: var(--product-text, #1f2937);
+}
+.mcp-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.mcp-heading h1 {
+  font-size: 26px;
+  margin: 0 0 8px;
+}
+.mcp-layout p {
+  line-height: 1.6;
+  color: #536171;
+}
+.mcp-layout button:not(.product-primary) {
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid #d4dce5;
+  border-radius: 7px;
+  background: #fff;
+  font-weight: 500;
+}
+.mcp-layout button:not(:disabled):hover {
+  border-color: var(--accent);
+}
+.mcp-layout button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mcp-columns {
+  display: grid;
+  grid-template-columns: 1fr 1.25fr;
+  gap: 20px;
+  align-items: start;
+}
+.mcp-card {
+  background: var(--product-surface, #fff);
+  border: 1px solid #e1e6eb;
+  border-radius: 14px;
+  padding: 24px;
+  margin-bottom: 20px;
+  min-width: 0;
+}
+.mcp-card h2 {
+  font-size: 19px;
+  margin: 0 0 16px;
+}
+.mcp-card h3 {
+  font-size: 16px;
+}
+.mcp-card select {
+  padding: 10px;
+  border: 1px solid #d4dce5;
+  border-radius: 8px;
+  max-width: 100%;
+  background: #fff;
+}
+.mcp-warning {
+  background: #fff8e7;
+  border: 1px solid #eed9a6;
+  border-radius: 8px;
+  padding: 14px;
+  line-height: 1.6;
+}
+.mcp-entry {
+  border-top: 1px solid #e5e9ee;
+  padding: 16px 0;
+  overflow-wrap: anywhere;
+}
+.mcp-entry p {
+  margin: 6px 0;
+}
+.mcp-card.product-form .mcp-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-weight: 400;
+}
+.mcp-card.product-form .mcp-check input {
+  width: auto;
+}
+.mcp-check small {
+  color: #667487;
+}
+.mcp-card fieldset {
+  border: 1px solid #e1e6eb;
+  border-radius: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+.mcp-card pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #f5f7fa;
+  border-radius: 8px;
+  padding: 14px;
+  max-height: 360px;
+  overflow: auto;
+}
+.mcp-actions {
+  display: flex;
+  gap: 12px;
+  margin: 16px 0;
+}
+.mcp-layout code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  .mcp-columns {
+    grid-template-columns: 1fr;
+  }
+  .mcp-layout {
+    padding: 20px 12px;
+  }
+  .mcp-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .mcp-card {
+    padding: 18px;
+  }
+  .mcp-actions {
+    flex-direction: column;
+  }
+}

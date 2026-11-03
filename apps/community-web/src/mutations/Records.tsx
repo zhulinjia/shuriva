@@ -7,18 +7,20 @@ export function ExecutionRecord({
   busy,
   onRefresh,
   onCancel,
+  readOnly = false,
 }: {
   record: Execution;
   busy: boolean;
   onRefresh: () => void;
   onCancel: () => void;
+  readOnly?: boolean;
 }) {
   const unknown = record.state === "outcome_unknown";
   return (
     <section className={`mut-record ${unknown ? "mut-unknown" : ""}`} aria-label="本次执行状态">
       <div className="mut-section-title">
         <div>
-          <span className="mut-eyebrow">本次操作</span>
+          <span className="mut-eyebrow">{readOnly ? "历史记录（上次读取快照）" : "本次操作"}</span>
           <h3>{labels[record.state]}</h3>
         </div>
         <span className={`mut-state mut-state-${record.state}`}>
@@ -77,21 +79,23 @@ export function ExecutionRecord({
         </p>
       )}
       {record.code && <small className="mut-muted">核对代码：{record.code}</small>}
-      <div className="mut-inline-actions">
-        <Button className="outline-button" type="button" disabled={busy} onClick={onRefresh}>
-          <RefreshCw size={14} />
-          核对原结果
-        </Button>
-        {canCancel(record) && (
-          <Button className="outline-button" type="button" disabled={busy} onClick={onCancel}>
-            请求取消
+      {!readOnly && (
+        <div className="mut-inline-actions">
+          <Button className="outline-button" type="button" disabled={busy} onClick={onRefresh}>
+            <RefreshCw size={14} />
+            核对原结果
           </Button>
-        )}
-        {record.permitIssued &&
-          !["committed", "rolled_back", "rejected"].includes(record.state) && (
-            <span className="mut-muted">已进入提交核对，取消不可用。</span>
+          {canCancel(record) && (
+            <Button className="outline-button" type="button" disabled={busy} onClick={onCancel}>
+              请求取消
+            </Button>
           )}
-      </div>
+          {record.permitIssued &&
+            !["committed", "rolled_back", "rejected"].includes(record.state) && (
+              <span className="mut-muted">已进入提交核对，取消不可用。</span>
+            )}
+        </div>
+      )}
     </section>
   );
 }
@@ -140,19 +144,30 @@ export function RecentExecutions({
   nextCursor,
   onOpen,
   onMore,
+  snapshot = false,
+  onReload,
 }: {
   records: Execution[];
   busy: boolean;
   nextCursor: string | null;
   onOpen: (id: string) => void;
   onMore: () => void;
+  snapshot?: boolean;
+  onReload?: () => void;
 }) {
   return (
     <section className="mut-recent" aria-label="待处理与最近执行">
       <div className="mut-section-title">
         <h3>待处理与最近执行</h3>
-        <span className="mut-muted">只展示元数据，不保存原始值</span>
+        <span className="mut-muted">
+          {snapshot ? "上次读取的历史快照，可能已变化" : "只展示元数据，不保存原始值"}
+        </span>
       </div>
+      {snapshot && onReload && (
+        <Button className="outline-button" type="button" disabled={busy} onClick={onReload}>
+          重新读取执行历史
+        </Button>
+      )}
       {!records.length ? (
         <p className="mut-muted">当前读取未见执行记录；这不能单独证明旧确认未被登记。</p>
       ) : (

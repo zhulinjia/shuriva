@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { RowDataPacket } from "mysql2/promise";
-import { mutationFixture } from "./mutation-fixture.js";
-import { MutationStore } from "../src/mutations/store.js";
+import { authSessionReferenceActive } from "../src/auth.js";
 import { HistoryStore } from "../src/history/store.js";
 import { migrateStage6, migrateStage7, migrateStage8 } from "../src/migrations.js";
 import { mutationTables } from "../src/mutations/migration.js";
-import { authSessionReferenceActive } from "../src/auth.js";
+import { MutationStore } from "../src/mutations/store.js";
+import { mutationFixture } from "./mutation-fixture.js";
 
 test("G4 recovery pagination retains every execution while terminal states change", {
   skip: process.env.STAGE8_G3_TEST !== "1",
@@ -93,6 +93,7 @@ test("G4 actual audit SQL outage survives store restart and replays once with it
       f.sources,
       "a".repeat(64),
       authSessionReferenceActive,
+      true,
     );
     await restarted.flushAudit(sink);
     await restarted.flushAudit(sink);

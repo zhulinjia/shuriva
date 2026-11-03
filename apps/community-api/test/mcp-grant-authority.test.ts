@@ -28,6 +28,41 @@ const grant: McpGrantRecord = {
   expiresAt: 800,
   revoked: false,
 };
+test("held action checks its physical lease after asynchronous work", async () => {
+  let expired = false,
+    published = false;
+  const authority = createMcpGrantAuthority(
+    {
+      observe: async (_hash, decide) =>
+        decide({
+          grant,
+          sessionExpiresAt: 700,
+          assertActive: () => {
+            if (expired) throw Error("lease expired");
+          },
+        }),
+    },
+    issuer,
+    resource,
+    () => 100,
+  );
+  await assert.rejects(
+    () =>
+      authority(
+        "synthetic",
+        token,
+        async () => token,
+        async (_grant, assertActive) => {
+          await Promise.resolve();
+          expired = true;
+          assertActive();
+          published = true;
+        },
+      ),
+    /lease expired/,
+  );
+  assert.equal(published, false);
+});
 
 test("MCP token authorization binds actual grant, approval session, final SDK observation and hash", async () => {
   let observedHash = "";

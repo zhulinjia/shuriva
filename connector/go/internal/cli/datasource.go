@@ -69,7 +69,7 @@ func sourceCommand(ctx context.Context, args []string, stdin *os.File, stdout, s
 		if err := store.Replace(p); err != nil {
 			return err
 		}
-		fmt.Fprintln(stdout, "本机只读表和字段授权已更新；查询功能尚未开放。")
+		fmt.Fprintln(stdout, "本机只读表和字段授权已更新；查询须同时通过平台授权、SQL 校验和本机策略。")
 		return nil
 	case "adopt":
 		flags := flag.NewFlagSet("source adopt", flag.ContinueOnError)

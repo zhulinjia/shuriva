@@ -30,15 +30,44 @@ export class ReadService {
   private flushing = false;
   private closed = false;
   private readonly sessionWatches = new Set<() => void>();
+  private readonly executionGuards = new Map<
+    string,
+    {
+      check: () => Promise<boolean>;
+      run: <T>(action: (assertActive: () => void, signal: AbortSignal) => Promise<T>) => Promise<T>;
+    }
+  >();
+  /** External delegations retain their own current authorization check, in
+   * addition to the real browser session attached to each approved task. */
+  guardExecution(
+    id: string,
+    check: () => Promise<boolean>,
+    run: <T>(action: (assertActive: () => void, signal: AbortSignal) => Promise<T>) => Promise<T>,
+  ): void {
+    if (this.executionGuards.has(id) || this.executionGuards.size >= 128)
+      throw new Error("CAPACITY");
+    this.executionGuards.set(id, { check, run });
+  }
+  clearExecutionGuard(id: string): void {
+    this.executionGuards.delete(id);
+  }
   authenticate(headers: Parameters<SessionAccess["authenticate"]>[0]) {
     return this.sessions.authenticate(headers);
   }
-  private async sessionActive(scope: Scope, id: string, nonce: string): Promise<boolean> {
+  private async sessionActive(
+    scope: Scope,
+    id: string,
+    nonce: string,
+    checkGuard = true,
+  ): Promise<boolean> {
     if (this.closed) return false;
     const identity = this.jobs.sessionIdentity(scope, id);
     return (
       identity?.taskNonce === nonce &&
       (await this.sessions.active(identity)) &&
+      (!checkGuard ||
+        !this.executionGuards.has(id) ||
+        (await this.executionGuards.get(id)?.check()) === true) &&
       !this.closed &&
       this.jobs.sessionIdentity(scope, id)?.taskNonce === nonce
     );
@@ -56,6 +85,19 @@ export class ReadService {
       throw new Error("STALE");
     }
     return identity;
+  }
+  /** Observe authorization without disposing data or declaring cancellation. */
+  async sessionIsActive(scope: Scope, id: string, expectedSessionId?: string) {
+    if (this.closed) return false;
+    const identity = this.jobs.sessionIdentity(scope, id);
+    if (!identity || (expectedSessionId !== undefined && identity.sessionId !== expectedSessionId))
+      return false;
+    const active = await this.sessions.active(identity);
+    return (
+      active &&
+      !this.closed &&
+      this.jobs.sessionIdentity(scope, id)?.taskNonce === identity.taskNonce
+    );
   }
   /** Final sends recheck the database directly. Polling also aborts waits and
    * in-flight replies after logout, external reset or expiration. */
@@ -192,6 +234,7 @@ export class ReadService {
     this.sessionWatches.clear();
     if (this.journalTimer) clearInterval(this.journalTimer);
     this.jobs.close();
+    this.executionGuards.clear();
     this.bindingTokens.clear();
     for (const watchers of this.bindingWatchers.values())
       for (const watcher of watchers) watcher.abort();
@@ -315,7 +358,10 @@ export class ReadService {
     };
   }
 
-  async next(connectorId: string): Promise<ReadTask | CancelTask | null> {
+  async next(
+    connectorId: string,
+    publish?: (task: ReadTask, assertActive: () => void, signal?: AbortSignal) => Promise<void>,
+  ): Promise<ReadTask | CancelTask | null> {
     const work = this.jobs.claim(connectorId);
     if (!work) return null;
     const scope = this.scope(work.task);
@@ -356,20 +402,26 @@ export class ReadService {
         this.jobs.reject(scope, work.task.id, work.task.nonce);
         return null;
       }
-      const signed = await this.registry.issueReadTask(work.task);
-      await this.flushHistory();
-      if (!(await this.sessionActive(scope, work.task.id, work.task.nonce))) {
-        this.jobs.reject(scope, work.task.id, work.task.nonce);
-        return null;
-      }
-      if (!this.jobs.markDispatched(scope, work.task.id, work.task.nonce)) return null;
-      diagnostics.info("query.dispatched", {
-        taskId: work.task.id,
-        sourceId: scope.sourceId,
-        connectorId: scope.connectorId,
-        operation: work.task.operation,
-      });
-      return signed;
+      const dispatch = async (assertActive: () => void = () => {}, signal?: AbortSignal) => {
+        const signed = await this.registry.issueReadTask(work.task);
+        await this.flushHistory();
+        if (!(await this.sessionActive(scope, work.task.id, work.task.nonce, false))) {
+          this.jobs.reject(scope, work.task.id, work.task.nonce);
+          return null;
+        }
+        assertActive();
+        if (!this.jobs.markDispatched(scope, work.task.id, work.task.nonce)) return null;
+        diagnostics.info("query.dispatched", {
+          taskId: work.task.id,
+          sourceId: scope.sourceId,
+          connectorId: scope.connectorId,
+          operation: work.task.operation,
+        });
+        if (publish) await publish(signed, assertActive, signal);
+        return signed;
+      };
+      const guard = this.executionGuards.get(work.task.id);
+      return guard ? guard.run(dispatch) : dispatch();
     });
   }
 

@@ -69,6 +69,85 @@ test("a stalled authorization destroys its locked connection and cannot commit l
   assert.equal(committed, false);
 });
 
+test("a lost or late COMMIT cannot persist a successful receipt state", async () => {
+  let entered!: () => void, release!: () => void;
+  const inCommit = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let lateCommit = false,
+    destroyed = false;
+  const statements: string[] = [];
+  const connection = {
+    query: async () => {},
+    beginTransaction: async () => {},
+    execute: async (sql: string) => {
+      statements.push(sql);
+      if (sql.includes("mcp_grant_token"))
+        return [
+          [
+            {
+              id: "grant",
+              ownerId: "owner",
+              clientId: "client",
+              approvalSessionId: "session",
+              resource: "resource",
+              generation: 1,
+              issuedGeneration: 1,
+              expiresAt: new Date(Date.now() + 60000),
+              revokedAt: null,
+            },
+          ],
+        ];
+      return [[{ id: "invocation" }]];
+    },
+    commit: async () => {
+      entered();
+      await gate;
+      lateCommit = true;
+    },
+    rollback: async () => {},
+    destroy: () => {
+      destroyed = true;
+    },
+    release: () => {},
+  };
+  const observation = mysqlMcpGrantObservation(
+    { getConnection: async () => connection } as unknown as Pool,
+    async () => Date.now() + 60000,
+    25,
+  );
+  const promise = observation.observe("a".repeat(64), async ({ acknowledgeHandoff }) => {
+    assert.ok(acknowledgeHandoff);
+    assert.equal(
+      await acknowledgeHandoff({
+        ownerId: "owner",
+        id: "invocation",
+        grantId: "grant",
+        generation: 1,
+        commitment: "c",
+        bootId: "boot",
+        sessionId: "session",
+      }),
+      true,
+    );
+    return true;
+  });
+  await inCommit;
+  await assert.rejects(promise, /MCP_GRANT_DEADLINE_EXCEEDED/);
+  assert.equal(destroyed, true);
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(lateCommit, true);
+  assert.equal(
+    statements.some((sql) => /^\s*UPDATE\s+mcp_invocation/i.test(sql)),
+    false,
+  );
+  assert.ok(statements.some((sql) => /state='handoff_unknown'.*FOR UPDATE/i.test(sql)));
+});
+
 test("a late pool checkout is released and retains its bounded slot until it arrives", async () => {
   let give: (value: unknown) => void = () => {},
     released = 0,

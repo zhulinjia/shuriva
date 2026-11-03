@@ -6,14 +6,14 @@ import (
 	"testing"
 )
 
-func TestDefaultStatusReportsDisabledCapabilities(t *testing.T) {
+func TestDefaultStatusReportsReadOnlyCapabilityAndWriteBoundary(t *testing.T) {
 	t.Setenv("CONNECTOR_CONFIG_PATH", t.TempDir()+"/connector.json")
 	var out, errOut bytes.Buffer
 	code := Run(nil, &out, &errOut, "test-version")
 	if code != 0 || errOut.Len() != 0 {
 		t.Fatalf("status: exit=%d stderr=%q", code, errOut.String())
 	}
-	for _, want := range []string{"test-version", "Database connection: local metadata checks only", "Query and write execution: disabled"} {
+	for _, want := range []string{"test-version", "Read-only queries: signed platform tasks with platform and local authorization", "Runtime writes: disabled"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("status output missing %q: %q", want, out.String())
 		}

@@ -16,9 +16,12 @@ export class ApiError extends Error {
 }
 
 // Only recognized bounded error codes cross the untrusted response boundary.
-async function capacityCode(response: Response): Promise<ApiError["code"]> {
+async function responseErrorCode(
+  response: Response,
+  messages?: Readonly<Record<string, string>>,
+): Promise<string | undefined> {
   if (
-    ![409, 503].includes(response.status) ||
+    (!messages && ![409, 503].includes(response.status)) ||
     !response.headers.get("content-type")?.includes("application/json") ||
     !response.body
   )
@@ -48,8 +51,10 @@ async function capacityCode(response: Response): Promise<ApiError["code"]> {
       body &&
       typeof body === "object" &&
       "error" in body &&
-      ((response.status === 503 &&
-        (body.error === "CAPACITY" || body.error === "RESULT_CAPACITY")) ||
+      typeof body.error === "string" &&
+      ((messages && Object.hasOwn(messages, body.error)) ||
+        (response.status === 503 &&
+          (body.error === "CAPACITY" || body.error === "RESULT_CAPACITY")) ||
         (response.status === 409 &&
           (body.error === "SEMANTIC_STALE" ||
             body.error === "NO_MODEL_FIELDS" ||
@@ -64,27 +69,44 @@ async function capacityCode(response: Response): Promise<ApiError["code"]> {
   return undefined;
 }
 
-export async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  return (await apiResponse(path, options)).json() as Promise<T>;
+export async function api<T>(
+  path: string,
+  options?: RequestInit,
+  messages?: Readonly<Record<string, string>>,
+): Promise<T> {
+  return (await apiResponse(path, options, messages)).json() as Promise<T>;
 }
 
 export async function apiResponse(
   path: RequestInfo | URL,
   options?: RequestInit,
+  messages?: Readonly<Record<string, string>>,
 ): Promise<Response> {
   const response = await fetch(path, { credentials: "same-origin", ...options });
   if (!response.ok) {
+    const serverCode = await responseErrorCode(response, messages);
     const message =
-      response.status === 401
-        ? "用户名或密码错误，或登录已过期。"
-        : response.status === 429
-          ? "操作过于频繁，请稍后再试。"
-          : response.status === 403
-            ? "没有权限执行此操作。"
-            : "操作未完成，请检查输入后重试。";
+      serverCode && messages && Object.hasOwn(messages, serverCode)
+        ? messages[serverCode]
+        : response.status === 401
+          ? "用户名或密码错误，或登录已过期。"
+          : response.status === 429
+            ? "操作过于频繁，请稍后再试。"
+            : response.status === 403
+              ? "没有权限执行此操作。"
+              : "操作未完成，请检查输入后重试。";
     const header = response.headers.get("x-request-id");
     const requestId = header && /^[A-Za-z0-9_-]{1,64}$/.test(header) ? header : undefined;
-    throw new ApiError(response.status, message, await capacityCode(response), requestId);
+    const code: ApiError["code"] =
+      (response.status === 503 &&
+        (serverCode === "CAPACITY" || serverCode === "RESULT_CAPACITY")) ||
+      (response.status === 409 &&
+        (serverCode === "SEMANTIC_STALE" ||
+          serverCode === "NO_MODEL_FIELDS" ||
+          serverCode === "SEMANTICS_TOO_LARGE"))
+        ? serverCode
+        : undefined;
+    throw new ApiError(response.status, message ?? "操作未完成。", code, requestId);
   }
   return response;
 }

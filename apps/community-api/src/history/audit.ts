@@ -173,7 +173,21 @@ export class AuditTrail {
         res.status(503).json({ error: "AUDIT_UNAVAILABLE" });
         return;
       }
+      let recorded = false;
+      res.once("close", () => {
+        if (recorded) return;
+        recorded = true;
+        const declared = declaredRequestAudit(res);
+        if (!declared || req.method === "GET") return;
+        try {
+          this.record(actor, { ...declared.entry, outcome: "unknown" }, declared.scope ?? null);
+        } catch (error) {
+          diagnostics.error("audit.completed_request_unavailable", {}, error);
+        }
+      });
       res.once("finish", () => {
+        if (recorded) return;
+        recorded = true;
         const declared = declaredRequestAudit(res);
         const context = requestAuditContext(res);
         const record = (entry: AuditEntry) => {
@@ -212,6 +226,8 @@ export class AuditTrail {
       res.json(this.health());
     });
     for (const prefix of [
+      "external-mcp",
+      "mcp",
       "data-sources",
       "connectors",
       "model",

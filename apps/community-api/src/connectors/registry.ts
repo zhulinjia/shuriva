@@ -1,4 +1,14 @@
 import {
+  canonicalPairFields,
+  canonicalPairProofFields,
+  canonicalIdentityFields,
+  canonicalPairAcknowledgement,
+  canonicalIdentityAcknowledgement,
+  type HeartbeatInput,
+  type PairInput,
+  type RotateInput,
+} from "@shuriva/core-contracts";
+import {
   createCipheriv,
   createDecipheriv,
   createHash,
@@ -72,61 +82,11 @@ interface State {
   replays: Replay[];
   tasks: StoredTask[];
 }
-export type HeartbeatInput = SignedMessage;
-export interface RotateInput extends SignedMessage {
-  newPublicKey: string;
-}
-export interface PairInput {
-  pairingId: string;
-  proof: string;
-  connectorId: string;
-  name: string;
-  publicKey: string;
-  agentVersion: string;
-  protocol: number;
-  signature: string;
-}
+export type { HeartbeatInput, PairInput, RotateInput } from "@shuriva/core-contracts";
 const LIMIT = 5000;
-export function canonicalPair(input: PairInput): string[] {
-  return [
-    "connector-v2",
-    "pair",
-    input.pairingId,
-    input.proof,
-    input.connectorId,
-    input.name,
-    input.publicKey,
-    input.agentVersion,
-    "2",
-  ];
-}
-export function canonicalPairProof(input: PairInput): string[] {
-  return [
-    "connector-v2",
-    "pair-proof",
-    input.pairingId,
-    input.connectorId,
-    input.name,
-    input.publicKey,
-    input.agentVersion,
-    "2",
-  ];
-}
-export function canonicalSigned(
-  op: "heartbeat" | "rotate" | "probe",
-  input: HeartbeatInput | RotateInput,
-): string[] {
-  return [
-    "connector-v1",
-    op,
-    input.connectorId,
-    ...(op === "rotate" ? [(input as RotateInput).newPublicKey] : []),
-    input.agentVersion,
-    String(input.protocol),
-    String(input.timestamp),
-    input.nonce,
-  ];
-}
+export const canonicalPair = canonicalPairFields;
+export const canonicalPairProof = canonicalPairProofFields;
+export const canonicalSigned = canonicalIdentityFields;
 export function taskFields(task: DiagnosticTask): string[] {
   return [
     "connector-v1",
@@ -240,29 +200,13 @@ export class ConnectorRegistry {
     return this.signer.publicKey();
   }
   pairAcknowledgement(input: PairInput): string {
-    return this.signer.signFields([
-      "connector-v2",
-      "pair-ack",
-      input.pairingId,
-      input.connectorId,
-      input.publicKey,
-      input.proof,
-      "2",
-    ]);
+    return this.signer.signFields(canonicalPairAcknowledgement(input));
   }
   acknowledgement(
     operation: "heartbeat" | "rotate" | "probe",
     input: HeartbeatInput | RotateInput,
   ): string {
-    const fields = [
-      "connector-v1",
-      `${operation}-ack`,
-      input.connectorId,
-      ...(operation === "rotate" ? [(input as RotateInput).newPublicKey] : []),
-      input.nonce,
-      "1",
-    ];
-    return this.signer.signFields(fields);
+    return this.signer.signFields(canonicalIdentityAcknowledgement(operation, input));
   }
 
   private mac(data: unknown): Buffer {

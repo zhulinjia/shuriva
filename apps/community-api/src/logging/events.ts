@@ -1,10 +1,14 @@
 /** Diagnostics accept fixed event codes; free-form text is never a log API. */
 const events = new Set([
+  "mcp.request_failed",
+  "mcp.external_failed",
+  "mcp.authorization_unavailable",
   "auth.session_cleanup_failed",
   "diagnostic.invalid_event",
   "diagnostic.file_unavailable",
   "diagnostic.close_failed",
   "http.completed",
+  "http.delivery_rejected",
   "framework.lifecycle",
   "framework.warning",
   "framework.failure",

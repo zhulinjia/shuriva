@@ -32,6 +32,17 @@ export interface MutationClient {
     after?: string,
   ): Promise<{ items: TargetReceipt[]; nextCursor: string | null; metadataError: string | null }>;
 }
+export class MutationAccessError extends Error {
+  readonly reason: "login_required" | "access_denied";
+  constructor(reason: "login_required" | "access_denied") {
+    super(
+      reason === "login_required"
+        ? "登录已过期。重新登录后请找回原操作，不要重复提交。"
+        : "当前没有权限核对或操作该数据源，请勿重复提交。",
+    );
+    this.reason = reason;
+  }
+}
 const invalid = () => Error("服务返回的数据不完整，当前操作仍需核对，请勿重新提交。");
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid();
@@ -85,10 +96,12 @@ function previewMetadata(value: unknown): Omit<Preview, "rows"> {
   if (!/^[A-Za-z0-9_-]{43}$/.test(commitment)) throw invalid();
   const table = text(body.table, 64);
   if (!table) throw invalid();
+  const revision = integer(body.revision, 4294967295);
+  if (revision < 1) throw invalid();
   return {
     previewId: id(body.previewId),
     commitment,
-    revision: integer(body.revision, 4294967295),
+    revision,
     operation: operation as Preview["operation"],
     table,
     rowCount: integer(body.rowCount, 100),
@@ -246,11 +259,34 @@ async function request(
     reader.releaseLock();
   }
   if (!response.ok) {
-    if (response.status === 401) throw Error("登录已过期。重新登录后请找回原操作，不要重复提交。");
+    if (response.status === 401) throw new MutationAccessError("login_required");
     if (response.status === 403 || response.status === 404)
-      throw Error("当前没有权限核对或操作该数据源，请勿重复提交。");
+      throw new MutationAccessError("access_denied");
     if (response.status === 409) throw Error("操作状态或授权已变化。请核对原确认和执行记录。");
-    if (response.status === 503) throw Error("受控写入暂不可用；原操作结果请从记录中继续核对。");
+    if (response.status === 503) {
+      if (length <= 2048) {
+        let originUnavailable = false;
+        try {
+          const bytes = new Uint8Array(length);
+          let offset = 0;
+          for (const chunk of chunks) {
+            bytes.set(chunk, offset);
+            offset += chunk.length;
+          }
+          const body: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+          originUnavailable =
+            !!body &&
+            typeof body === "object" &&
+            "error" in body &&
+            body.error === "MCP_CHANGE_ORIGIN_UNAVAILABLE";
+        } catch {
+          /* Treat malformed error bodies as generic unavailability. */
+        }
+        if (originUnavailable)
+          throw Error("草稿来源校验当前不可用，已停止生成预览；请勿重复提交草稿。");
+      }
+      throw Error("受控写入暂不可用；原操作结果请从记录中继续核对。");
+    }
     throw Error("请求未完成，请核对原操作，勿直接重复提交。");
   }
   const bytes = new Uint8Array(length);
@@ -265,7 +301,7 @@ export const mutationRequestTimeoutMs = 30_000;
 export function mutationClient(
   workspace: string,
   source: string,
-  options: { fetch?: typeof fetch; requestTimeoutMs?: number } = {},
+  options: { fetch?: typeof fetch; requestTimeoutMs?: number; originInvocationId?: string } = {},
 ): MutationClient {
   const base = `/api/mutations/${encodeURIComponent(workspace)}/${encodeURIComponent(source)}`;
   const lifetime = new AbortController();
@@ -307,7 +343,12 @@ export function mutationClient(
       };
     },
     async preview(plan) {
-      return parsePreview(await boundedRequest(`${base}/previews`, { plan }));
+      return parsePreview(
+        await boundedRequest(`${base}/previews`, {
+          plan,
+          ...(options.originInvocationId ? { originInvocationId: options.originInvocationId } : {}),
+        }),
+      );
     },
     async confirm(input) {
       return parseExecution(

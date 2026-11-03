@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { DataSourceError } from "./errors.js";
-import type { BoundSnapshot, BoundSourceAccess } from "./public.js";
+import type { BoundSnapshot, BoundSourceAccess, SourceBindingIdentity } from "./public.js";
 import { validateSnapshot } from "./snapshot.js";
 
 export { DataSourceError } from "./errors.js";
@@ -54,46 +54,122 @@ const bindingProjection =
   "SELECT s.id, s.connectorId, s.name, s.createdAt, (d.sourceId IS NOT NULL) AS isDefault, CASE WHEN sc.status = 'pending' AND sc.expiresAt <= UTC_TIMESTAMP(3) THEN 'expired' ELSE sc.status END AS scanStatus, sc.errorCode FROM workspace_data_source b JOIN workspace w ON w.id = b.workspaceId JOIN data_source s ON s.id = b.sourceId LEFT JOIN workspace_default_source d ON d.workspaceId = b.workspaceId AND d.sourceId = b.sourceId LEFT JOIN schema_scan sc ON sc.id = (SELECT lastScan.id FROM schema_scan lastScan WHERE lastScan.workspaceId = b.workspaceId AND lastScan.sourceId = b.sourceId ORDER BY lastScan.`sequence` DESC LIMIT 1) WHERE w.id = ? AND w.createdByAccountId = ? AND w.archivedAt IS NULL AND s.ownerId = ?";
 
 export class DataSourceStore implements BoundSourceAccess {
-  constructor(private readonly pool: Pool) {}
+  constructor(
+    private readonly pool: Pool,
+    private readonly bindingIdentities = false,
+  ) {}
 
-  private async transaction<T>(fn: (connection: PoolConnection) => Promise<T>): Promise<T> {
+  private async transaction<T>(
+    fn: (connection: PoolConnection) => Promise<T>,
+    boundedLockWait = false,
+  ): Promise<T> {
     const connection = await this.pool.getConnection();
+    let previousLockWait: number | undefined;
+    let outcome: { ok: true; value: T } | { ok: false; error: unknown };
     try {
+      if (boundedLockWait) {
+        const [rows] = await connection.query<RowDataPacket[]>(
+          "SELECT @@SESSION.innodb_lock_wait_timeout AS timeout",
+        );
+        const timeout = Number(rows[0]?.timeout);
+        if (!Number.isInteger(timeout) || timeout < 1) throw new DataSourceError("NOT_FOUND");
+        previousLockWait = timeout;
+        await connection.query("SET SESSION innodb_lock_wait_timeout=5");
+      }
       await connection.beginTransaction();
       const result = await fn(connection);
       await connection.commit();
-      return result;
+      outcome = { ok: true, value: result };
     } catch (error) {
-      await connection.rollback();
-      throw error;
+      outcome = { ok: false, error };
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        outcome = {
+          ok: false,
+          error: new AggregateError(
+            [error, rollbackError],
+            "Source transaction and rollback failed",
+          ),
+        };
+      }
+    }
+    try {
+      if (previousLockWait !== undefined) {
+        try {
+          // mysql2's prepared numeric parameter is DOUBLE; this MySQL integer
+          // system variable requires the escaped integer in the text protocol.
+          await connection.query("SET SESSION innodb_lock_wait_timeout=?", [previousLockWait]);
+        } catch (error) {
+          connection.destroy();
+          outcome = {
+            ok: false,
+            error: outcome.ok
+              ? error
+              : new AggregateError(
+                  [outcome.error, error],
+                  "Source operation and connection reset failed",
+                ),
+          };
+        }
+      }
     } finally {
       connection.release();
     }
+    if (!outcome.ok) throw outcome.error;
+    return outcome.value;
   }
 
   async withBoundSnapshot<T>(
     owner: string,
     workspace: string,
     source: string,
-    action: (connection: PoolConnection, snapshot: BoundSnapshot | null) => Promise<T>,
+    action: (
+      connection: PoolConnection,
+      snapshot: BoundSnapshot | null,
+      binding: SourceBindingIdentity,
+    ) => Promise<T>,
   ): Promise<T> {
     if (!validId(workspace) || !validId(source)) throw new DataSourceError("INVALID");
     return this.transaction(async (connection) => {
       // Keep the same lock order as binding changes and scan publication.
       await this.lockWorkspace(connection, owner, workspace);
-      await this.lockSource(connection, owner, source);
+      const currentSource = await this.lockSource(connection, owner, source);
       await this.lockBinding(connection, workspace, source);
+      const binding = {
+        connectorId: currentSource.connectorId,
+        bindingGeneration: await this.bindingGeneration(connection, workspace, source),
+      };
       const [rows] = await connection.execute<SnapshotRow[]>(
         "SELECT sn.id, sn.content FROM schema_snapshot sn JOIN schema_scan sc ON sc.id=sn.scanId WHERE sn.workspaceId=? AND sn.sourceId=? ORDER BY sc.`sequence` DESC LIMIT 1",
         [workspace, source],
       );
       const row = rows[0];
-      if (!row) return action(connection, null);
+      if (!row) return action(connection, null, binding);
       const content: unknown =
         typeof row.content === "string" ? JSON.parse(row.content) : row.content;
       validateSnapshot(content);
-      return action(connection, { id: row.id, content });
+      return action(connection, { id: row.id, content }, binding);
     });
+  }
+
+  /** The callback owns the actual binding locks, including across processes. */
+  async withBoundIdentity<T>(
+    owner: string,
+    workspace: string,
+    source: string,
+    action: (binding: { connectorId: string; bindingGeneration: string }) => Promise<T>,
+  ): Promise<T> {
+    if (!this.bindingIdentities || !validId(workspace) || !validId(source))
+      throw new DataSourceError("NOT_FOUND");
+    return this.transaction(async (c) => {
+      await this.lockWorkspace(c, owner, workspace);
+      const current = await this.lockSource(c, owner, source);
+      await this.lockBinding(c, workspace, source);
+      const generation = await this.bindingGeneration(c, workspace, source);
+      if (!generation) throw new DataSourceError("NOT_FOUND");
+      return action({ connectorId: current.connectorId, bindingGeneration: generation });
+    }, true);
   }
 
   async list(
@@ -234,6 +310,11 @@ export class DataSourceStore implements BoundSourceAccess {
           "INSERT INTO workspace_data_source (workspaceId, sourceId, boundAt) VALUES (?, ?, UTC_TIMESTAMP(3))",
           [workspaceId, sourceId],
         );
+        if (this.bindingIdentities)
+          await connection.execute(
+            "INSERT INTO source_binding_identity(workspaceId,sourceId,generation) VALUES(?,?,?)",
+            [workspaceId, sourceId, randomUUID()],
+          );
       } catch (error) {
         if (error && typeof error === "object" && "code" in error && error.code === "ER_DUP_ENTRY")
           throw new DataSourceError("CONFLICT");
@@ -344,13 +425,40 @@ export class DataSourceStore implements BoundSourceAccess {
     ownerId: string,
     workspaceId: string,
     sourceId: string,
-  ): Promise<{ connectorId: string } | null> {
+  ): Promise<{ connectorId: string; bindingGeneration: string | null } | null> {
     if (!validId(workspaceId) || !validId(sourceId)) throw new DataSourceError("INVALID");
     const [rows] = await this.pool.execute<SourceRow[]>(
       "SELECT s.connectorId FROM data_source s JOIN workspace_data_source b ON b.sourceId = s.id JOIN workspace w ON w.id = b.workspaceId WHERE s.id = ? AND s.ownerId = ? AND s.archivedAt IS NULL AND w.id = ? AND w.createdByAccountId = ? AND w.archivedAt IS NULL",
       [sourceId, ownerId, workspaceId, ownerId],
     );
-    return rows[0] ?? null;
+    const row = rows[0];
+    if (!row) return null;
+    if (!this.bindingIdentities) return { connectorId: row.connectorId, bindingGeneration: null };
+    const [identities] = await this.pool.execute<RowDataPacket[]>(
+      "SELECT i.generation,s.connectorId FROM source_binding_identity i JOIN workspace_data_source b ON b.workspaceId=i.workspaceId AND b.sourceId=i.sourceId JOIN data_source s ON s.id=b.sourceId JOIN workspace w ON w.id=b.workspaceId WHERE b.workspaceId=? AND b.sourceId=? AND s.ownerId=? AND w.createdByAccountId=? AND s.archivedAt IS NULL AND w.archivedAt IS NULL",
+      [workspaceId, sourceId, ownerId, ownerId],
+    );
+    const identity = identities[0];
+    if (!identity) return null;
+    if (!validId(String(identity.generation))) throw new DataSourceError("INVALID");
+    return {
+      connectorId: String(identity.connectorId),
+      bindingGeneration: String(identity.generation),
+    };
+  }
+
+  private async bindingGeneration(
+    connection: PoolConnection,
+    workspaceId: string,
+    sourceId: string,
+  ): Promise<string | null> {
+    if (!this.bindingIdentities) return null;
+    const [rows] = await connection.execute<RowDataPacket[]>(
+      "SELECT generation FROM source_binding_identity WHERE workspaceId=? AND sourceId=? FOR UPDATE",
+      [workspaceId, sourceId],
+    );
+    if (!rows[0] || !validId(String(rows[0].generation))) throw new DataSourceError("NOT_FOUND");
+    return String(rows[0].generation);
   }
 
   async nextScan(connectorId: string): Promise<ScanRow | null> {

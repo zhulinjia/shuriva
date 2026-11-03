@@ -12,6 +12,34 @@ const scope = {
   sourceId: "33333333-3333-4333-8333-333333333333",
 };
 const parameters = [{ kind: "integer", value: "1" }];
+test("schema completion remains authoritative after its result is revoked", () => {
+  const jobs = new ReadJobs();
+  try {
+    const id = randomUUID();
+    jobs.createModelSchema(scope, id);
+    assert.equal(jobs.claim(scope.connectorId)?.type, "read");
+    const schema = {
+      database: "demo",
+      tables: [
+        {
+          name: "items",
+          columns: [{ name: "id", type: "int" }],
+          version: "a".repeat(64),
+          structureHash: "b".repeat(64),
+        },
+      ],
+    };
+    assert.equal(
+      jobs.complete(scope, id, "ok", Buffer.from(JSON.stringify(schema)).toString("base64url")),
+      true,
+    );
+    jobs.cancel(scope, id);
+    assert.equal(jobs.executionState(scope, id)?.state, "completed");
+    assert.equal(jobs.status(scope, id)?.payload, undefined);
+  } finally {
+    jobs.close();
+  }
+});
 
 test("delegated schema task carries an immutable narrow scope and binds it to request identity", () => {
   const jobs = new ReadJobs(() => 1_000_000);
@@ -290,4 +318,26 @@ test("an unconfirmed heartbeat reissues exactly the same task until completion",
   assert.equal(jobs.complete(scope, id, "failed", "error"), true);
   assert.equal(jobs.claim(scope.connectorId), null);
   jobs.close();
+});
+
+test("dispatched cancellation preserves uncertainty while queued cancellation is confirmed", () => {
+  const jobs = new ReadJobs();
+  try {
+    const queued = randomUUID(),
+      running = randomUUID();
+    jobs.create(scope, queued, "SELECT id FROM customers", [], 1);
+    jobs.cancel(scope, queued);
+    assert.equal(jobs.executionState(scope, queued)?.state, "cancelled");
+    jobs.create(scope, running, "SELECT id FROM customers", [], 1);
+    const work = jobs.claim(scope.connectorId);
+    assert.ok(work?.type === "read");
+    assert.equal(work.task.id, running);
+    jobs.markDispatched(scope, running, work.task.nonce);
+    jobs.cancel(scope, running);
+    assert.equal(jobs.executionState(scope, running)?.state, "outcome_unknown");
+    assert.equal(jobs.complete(scope, running, "failed", "cancelled"), false);
+    assert.equal(jobs.executionState(scope, running)?.state, "outcome_unknown");
+  } finally {
+    jobs.close();
+  }
 });

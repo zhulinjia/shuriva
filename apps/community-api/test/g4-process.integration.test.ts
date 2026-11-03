@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { randomBytes, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { g4Runtime, until } from "./g4-runtime/runtime.js";
+import { test } from "node:test";
+import { DataSourceStore } from "../src/datasources/store.js";
+import { resetOnlyAdminPassword } from "../src/reset-password.js";
 import {
+  assertCliIdentityGuard,
   encryptedSnapshot,
   restoreSnapshot,
-  assertCliIdentityGuard,
 } from "./g4-runtime/mysql-backup.js";
+import { g4Runtime, until } from "./g4-runtime/runtime.js";
 import { isolatedMysql } from "./isolated-mysql.js";
-import { resetOnlyAdminPassword } from "../src/reset-password.js";
 
 test("G4 actual API crash, lost confirmation response and cancel-before-permit never replay DML", {
   skip: process.env.STAGE8_G4_ACCEPTANCE !== "1",
@@ -77,9 +78,10 @@ async function verifyProcessAndRestore(runtime: Awaited<ReturnType<typeof g4Runt
       "INSERT INTO workspace(id,name,createdByAccountId,createdAt,updatedAt) VALUES (?,'G4 revoked binding',?,UTC_TIMESTAMP(3),UTC_TIMESTAMP(3))",
       [revokedWorkspace, runtime.fixture.binding.ownerId],
     );
-    await runtime.fixture.pool.execute(
-      "INSERT INTO workspace_data_source(workspaceId,sourceId,boundAt) VALUES (?,?,UTC_TIMESTAMP(3))",
-      [revokedWorkspace, runtime.fixture.binding.sourceId],
+    await runtime.fixture.sources.bind(
+      runtime.fixture.binding.ownerId,
+      revokedWorkspace,
+      runtime.fixture.binding.sourceId,
     );
     const [snapshotSessions] = await runtime.fixture.pool.query<
       import("mysql2/promise").RowDataPacket[]
@@ -173,9 +175,10 @@ async function verifyProcessAndRestore(runtime: Awaited<ReturnType<typeof g4Runt
       runtime.fixture.binding.sourceId,
     ]);
     assert.equal(currentBinding.length, 1);
-    await restoredPool.execute(
-      "INSERT INTO workspace_data_source(workspaceId,sourceId,boundAt) VALUES (?,?,UTC_TIMESTAMP(3))",
-      [runtime.fixture.binding.workspaceId, runtime.fixture.binding.sourceId],
+    await new DataSourceStore(restoredPool, true).bind(
+      runtime.fixture.binding.ownerId,
+      runtime.fixture.binding.workspaceId,
+      runtime.fixture.binding.sourceId,
     );
     const [revoked] = await restoredPool.query<import("mysql2/promise").RowDataPacket[]>(
       "SELECT workspaceId FROM workspace_data_source WHERE workspaceId=?",

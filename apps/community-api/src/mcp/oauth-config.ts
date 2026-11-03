@@ -9,7 +9,7 @@ export const mcpOAuthScopes = [
 ] as const;
 
 function validPage(path: string): boolean {
-  return /^\/(?!\/)[A-Za-z0-9/_-]+$/.test(path);
+  return /^\/(?!\/)[A-Za-z0-9/_-]*$/.test(path);
 }
 
 function safeHttpUrl(raw: string): boolean {

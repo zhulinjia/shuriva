@@ -3,11 +3,11 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { RowDataPacket } from "mysql2/promise";
 import { authSessionReferenceActive } from "../src/auth.js";
-import { executionBindingSchema, MutationError, publicExecution } from "../src/mutations/model.js";
-import { inspectStage8 } from "../src/mutations/migration.js";
-import { MutationStore } from "../src/mutations/store.js";
-import { MutationService } from "../src/mutations/service.js";
 import type { BoundSourceAccess } from "../src/datasources/public.js";
+import { inspectStage8 } from "../src/mutations/migration.js";
+import { executionBindingSchema, MutationError, publicExecution } from "../src/mutations/model.js";
+import { MutationService } from "../src/mutations/service.js";
+import { MutationStore } from "../src/mutations/store.js";
 import { mutationFixture } from "./mutation-fixture.js";
 
 const integration = { skip: process.env.STAGE8_G3_TEST !== "1" };
@@ -206,6 +206,7 @@ test(
         f.sources,
         randomBytes(32).toString("hex"),
         authSessionReferenceActive,
+        true,
       );
       await restarted.recoverPreviousBoot();
       assert.equal(
@@ -321,10 +322,10 @@ test(
             "INSERT INTO data_source (id,ownerId,connectorId,name,createdAt,updatedAt) VALUES (?,?,?,'alias',UTC_TIMESTAMP(3),UTC_TIMESTAMP(3))",
             [alias.sourceId, alias.ownerId, alias.connectorId],
           );
-          await f.pool.execute(
-            "INSERT INTO workspace_data_source (workspaceId,sourceId,boundAt) VALUES (?,?,UTC_TIMESTAMP(3))",
-            [alias.workspaceId, alias.sourceId],
-          );
+          await f.sources.bind(alias.ownerId, alias.workspaceId, alias.sourceId);
+          alias.bindingGeneration = (
+            await f.sources.boundSource(alias.ownerId, alias.workspaceId, alias.sourceId)
+          )?.bindingGeneration;
           const first = f.preview();
           await f.store.savePreview(f.binding, first);
           const started = await f.store.confirm(f.binding, f.sessionId, {
@@ -366,18 +367,24 @@ test(
           });
           const paused: BoundSourceAccess = {
             withBoundSnapshot: (owner, workspace, source, action) =>
-              f.sources.withBoundSnapshot(owner, workspace, source, async (c, snapshot) => {
-                const value = await action(c, snapshot);
-                freezeReady();
-                await held;
-                return value;
-              }),
+              f.sources.withBoundSnapshot(
+                owner,
+                workspace,
+                source,
+                async (c, snapshot, identity) => {
+                  const value = await action(c, snapshot, identity);
+                  freezeReady();
+                  await held;
+                  return value;
+                },
+              ),
           };
           const freezing = new MutationStore(
             f.pool,
             paused,
             f.boot,
             authSessionReferenceActive,
+            true,
           ).update(f.binding, started.execution.executionId, "outcome_unknown", "lost_receipt");
           await ready; // The real transaction owns the shared physical-target row; not committed yet.
           let aliasReady!: () => void;
@@ -386,18 +393,24 @@ test(
           });
           const aliasAccess: BoundSourceAccess = {
             withBoundSnapshot: (owner, workspace, source, action) =>
-              f.sources.withBoundSnapshot(owner, workspace, source, async (c, snapshot) => {
-                // withBoundSnapshot has already performed its consistent snapshot read.
-                // A non-locking freeze lookup here could see the old RR read view.
-                aliasReady();
-                return action(c, snapshot);
-              }),
+              f.sources.withBoundSnapshot(
+                owner,
+                workspace,
+                source,
+                async (c, snapshot, identity) => {
+                  // withBoundSnapshot has already performed its consistent snapshot read.
+                  // A non-locking freeze lookup here could see the old RR read view.
+                  aliasReady();
+                  return action(c, snapshot, identity);
+                },
+              ),
           };
           const aliasStore = new MutationStore(
             f.pool,
             aliasAccess,
             f.boot,
             authSessionReferenceActive,
+            true,
           );
           const competing =
             phase === "confirm"

@@ -4,11 +4,12 @@ import { signedMessageBodyFields } from "./identity-protocol.js";
 import { createHash } from "node:crypto";
 import { diagnostics } from "../logging/public.js";
 import { fromNodeHeaders } from "better-auth/node";
-import express, { type ErrorRequestHandler, type Express } from "express";
+import express, { type ErrorRequestHandler, type Express, type Response } from "express";
 import type { Auth } from "../auth.js";
 import { type ReadResult, readResultBodyFields } from "../protocol/read-task.js";
 import type { ConnectorRead } from "../queries/public.js";
 import { ConnectorError } from "./errors.js";
+import { installHttpResponseLease } from "../http-response-lease.js";
 import type {
   ConnectorRegistry,
   HeartbeatInput,
@@ -18,6 +19,32 @@ import type {
 } from "./registry.js";
 
 type ObjectBody = Record<string, unknown>;
+async function publishReadResponse(
+  res: Response,
+  body: unknown,
+  assertActive: () => void,
+  signal?: AbortSignal,
+) {
+  signal = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(5000)]);
+  const dispose = installHttpResponseLease(res, assertActive, signal);
+  const serialized = JSON.stringify(body);
+  const finished = new Promise<void>((resolve) => {
+    res.once("finish", resolve);
+    res.once("close", resolve);
+  });
+  const abort = () => res.destroy();
+  signal?.addEventListener("abort", abort, { once: true });
+  try {
+    if (res.destroyed) throw new ConnectorError("DENIED");
+    signal?.throwIfAborted();
+    assertActive();
+    res.type("application/json").send(serialized);
+    await finished;
+  } finally {
+    dispose();
+    signal?.removeEventListener("abort", abort);
+  }
+}
 function object(value: unknown): value is ObjectBody {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -251,7 +278,22 @@ export function mountConnectorRoutes(
       return;
     }
     const diagnostic = await registry.heartbeat(req.body);
-    const readTask = read ? await read.next(req.body.connectorId) : null;
+    const readTask = read
+      ? await read.next(req.body.connectorId, async (task, assertActive, signal) => {
+          await publishReadResponse(
+            res,
+            {
+              ok: true,
+              protocol: 1,
+              signature: registry.acknowledgement("heartbeat", req.body),
+              task,
+            },
+            assertActive,
+            signal,
+          );
+        })
+      : null;
+    if (res.headersSent || res.destroyed) return;
     const task =
       readTask ??
       (read?.jobs.busy(req.body.connectorId)

@@ -58,7 +58,10 @@ export class MutationService {
     private readonly access: MutationAccess,
     private readonly transport: MutationTransport,
     private readonly signer: MutationPermitSigner,
-    private readonly options: { enabled: boolean; executionEnabled?: boolean },
+    private readonly options: {
+      enabled: boolean;
+      executionEnabled?: boolean;
+    },
   ) {}
   private enabled(execution = false): void {
     if (!this.options.enabled || (execution && this.options.executionEnabled !== true))
@@ -69,19 +72,23 @@ export class MutationService {
   }
   async capability(scope: MutationScope) {
     const binding = await this.binding(scope);
-    if (!this.options.enabled)
+    if (!this.options.enabled || !binding.bindingGeneration)
       return {
-        enabled: false,
+        enabled: this.options.enabled,
         available: false,
         executionEnabled: false,
-        code: "feature_disabled",
+        code: this.options.enabled ? "binding_identity_required" : "feature_disabled",
         apiBoot: this.store.apiBoot,
         tables: [],
       };
     // No registry/workspace lock is held while waiting for a Connector reply.
     const response = await this.transport.capability(binding, this.store.apiBoot);
     await this.access.withScope(scope, async (current) => {
-      if (current.connectorId !== binding.connectorId) throw new MutationError("DENIED");
+      if (
+        current.connectorId !== binding.connectorId ||
+        current.bindingGeneration !== binding.bindingGeneration
+      )
+        throw new MutationError("DENIED");
     });
     if (response.targetIdentity && (await this.store.targetFrozen(scope, response.targetIdentity)))
       return {
@@ -99,10 +106,21 @@ export class MutationService {
       apiBoot: this.store.apiBoot,
     };
   }
-  async preview(scope: MutationScope, input: unknown) {
+  async preview(
+    scope: MutationScope,
+    input: unknown,
+    expectedBinding?: { connectorId: string; bindingGeneration: string },
+  ) {
     this.enabled();
     const plan = mutationPlanSchema.parse(input);
     const binding = await this.binding(scope);
+    if (!binding.bindingGeneration) throw new MutationError("UNAVAILABLE");
+    if (
+      expectedBinding &&
+      (binding.connectorId !== expectedBinding.connectorId ||
+        binding.bindingGeneration !== expectedBinding.bindingGeneration)
+    )
+      throw new MutationError("DENIED");
     const response = await this.transport.preview(binding, this.store.apiBoot, plan);
     const metadata = previewMetadataSchema.parse(response.metadata);
     const rows = presentationSchema.parse(response.presentation);
@@ -136,7 +154,12 @@ export class MutationService {
     )
       throw new MutationError("DENIED");
     await this.access.withScope(scope, async (current) => {
-      if (current.connectorId !== binding.connectorId) throw new MutationError("DENIED");
+      if (
+        current.connectorId !== binding.connectorId ||
+        current.bindingGeneration !== binding.bindingGeneration ||
+        (expectedBinding && current.bindingGeneration !== expectedBinding.bindingGeneration)
+      )
+        throw new MutationError("DENIED");
       await this.store.savePreview(current, metadata);
     });
     return { ...metadata, rows };

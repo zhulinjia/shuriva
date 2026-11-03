@@ -1,13 +1,13 @@
-import express, { type Express, type ErrorRequestHandler } from "express";
+import express, { type ErrorRequestHandler, type Express } from "express";
 import { z } from "zod";
-import { diagnostics } from "../logging/public.js";
 import { DataSourceError } from "../datasources/public.js";
+import { diagnostics } from "../logging/public.js";
 import {
   confirmationSchema,
   MutationError,
-  mutationId,
   type MutationIdentity,
   type MutationScope,
+  mutationId,
 } from "./model.js";
 import type { MutationAccess } from "./ports.js";
 import type { MutationService } from "./service.js";
@@ -19,6 +19,30 @@ export function mountMutationRoutes(
   origin: string,
   access: MutationAccess,
   service?: MutationService,
+  provenance?: {
+    verify(
+      identity: MutationIdentity,
+      scope: MutationScope,
+      id: string,
+      plan: unknown,
+    ): {
+      invocationId: string;
+      planChanged: boolean;
+      connectorId: string;
+      bindingGeneration: string;
+    };
+    record(
+      identity: MutationIdentity,
+      scope: MutationScope,
+      proof: {
+        invocationId: string;
+        planChanged: boolean;
+        connectorId: string;
+        bindingGeneration: string;
+      },
+      previewId: string,
+    ): Promise<void>;
+  },
 ): void {
   const router = express.Router();
   router.use((req, res, next) => {
@@ -58,8 +82,41 @@ export function mountMutationRoutes(
     res.json(await service?.capability(scope(req, res))),
   );
   router.post(`${prefix}/previews`, async (req, res) => {
-    const body = z.strictObject({ plan: z.unknown() }).parse(req.body);
-    res.status(201).json(await service?.preview(scope(req, res), body.plan));
+    const body = z
+      .strictObject({ plan: z.unknown(), originInvocationId: mutationId.optional() })
+      .parse(req.body);
+    const current = scope(req, res),
+      who = identity(res);
+    if (body.originInvocationId && !provenance) throw new MutationError("UNAVAILABLE");
+    let proof:
+      | {
+          invocationId: string;
+          planChanged: boolean;
+          connectorId: string;
+          bindingGeneration: string;
+        }
+      | undefined;
+    if (body.originInvocationId) {
+      try {
+        proof = provenance?.verify(who, current, body.originInvocationId, body.plan);
+      } catch {
+        res.status(503).json({ error: "MCP_CHANGE_ORIGIN_UNAVAILABLE" });
+        return;
+      }
+      if (!proof) {
+        res.status(503).json({ error: "MCP_CHANGE_ORIGIN_UNAVAILABLE" });
+        return;
+      }
+    }
+    const preview = await service?.preview(current, body.plan, proof);
+    if (!preview) throw new MutationError("UNAVAILABLE");
+    if (proof) {
+      const fresh = await access.authenticate(req.headers);
+      if (!fresh || fresh.ownerId !== who.ownerId || fresh.sessionId !== who.sessionId)
+        throw new MutationError("DENIED");
+      await provenance?.record(who, current, proof, preview.previewId);
+    }
+    res.status(201).json({ ...preview, ...(proof ? { origin: proof } : {}) });
   });
   router.post(`${prefix}/previews/:preview/confirm`, async (req, res) => {
     const body = confirmationSchema.parse(req.body);

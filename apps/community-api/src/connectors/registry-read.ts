@@ -1,4 +1,5 @@
 import type { RegistryProtocolContext } from "./registry-protocol-context.js";
+import { canonicalReadResultAcknowledgement } from "@shuriva/core-contracts";
 import { ConnectorError } from "./errors.js";
 import { createHash } from "node:crypto";
 import { UUID, B64, decode, verifySignature } from "./protocol-validation.js";
@@ -101,14 +102,7 @@ export class ReadRegistryProtocol {
   }
 
   readResultAcknowledgement(input: ReadResult): string {
-    return this.context.signer.signFields([
-      "connector-read-v1",
-      "read-result-ack",
-      input.connectorId,
-      input.taskId,
-      input.nonce,
-      "1",
-    ]);
+    return this.context.signer.signFields(canonicalReadResultAcknowledgement(input));
   }
 
   private checkReadResult(input: ReadResult): void {

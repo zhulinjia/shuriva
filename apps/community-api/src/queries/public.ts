@@ -1,4 +1,24 @@
 import type { ReadService } from "./service.js";
+export { validateDelegatedRead } from "./jobs.js";
+export type DelegatedRead = Pick<
+  ReadService,
+  | "withCurrentReadScope"
+  | "guardExecution"
+  | "clearExecutionGuard"
+  | "trackExecution"
+  | "assertSession"
+  | "sessionIsActive"
+> & {
+  jobs: Pick<
+    ReadService["jobs"],
+    | "createDelegated"
+    | "createDelegatedModelSchema"
+    | "status"
+    | "cancel"
+    | "sessionIdentity"
+    | "executionState"
+  >;
+};
 
 /** Public operations consumed by the existing HTTP adapters and model planner. */
 type Jobs = ReadService["jobs"];
@@ -20,6 +40,7 @@ export type WorkspaceRead = Pick<
   | "issueScope"
   | "validScope"
   | "trackExecution"
+  | "assertSession"
   | "invalidateBinding"
   | "watchBinding"
   | "assertSession"

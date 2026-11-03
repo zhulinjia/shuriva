@@ -21,11 +21,19 @@ import {
   isFrozen,
   mayConfirm,
   operationLabels,
+  type Confirmation,
   type Preview,
+  type Plan,
   previewCounts,
   terminalStates,
 } from "./model";
 import { ExecutionRecord, RecentExecutions, RecoveredReceipts } from "./Records";
+import {
+  clearChangeRecovery,
+  readChangeRecovery,
+  sameChangeRecovery,
+  saveChangeRecovery,
+} from "./recovery";
 import "./mutations.css";
 
 function PreviewRows({ preview }: { preview: Preview }) {
@@ -131,6 +139,13 @@ export function MutationPanel({
   unavailable = false,
   interactionBlocked = false,
   onBusyChange,
+  initialPlan,
+  originInvocationId,
+  showScopeIdentity = false,
+  previewUnavailable = false,
+  restoredPending,
+  recovery,
+  onDefer,
 }: {
   workspaceId: string;
   sourceId: string;
@@ -138,6 +153,17 @@ export function MutationPanel({
   unavailable?: boolean;
   interactionBlocked?: boolean;
   onBusyChange?: (busy: boolean) => void;
+  initialPlan?: Plan;
+  originInvocationId?: string;
+  showScopeIdentity?: boolean;
+  previewUnavailable?: boolean;
+  restoredPending?: Confirmation;
+  recovery?: {
+    save(pending: Confirmation): void;
+    clear(pending: Confirmation): void;
+    canDefer(pending: Confirmation): boolean;
+  };
+  onDefer?: () => void;
 }) {
   const [view, setView] = useState<MutationView>(initialMutationView);
   const [draft, setDraft] = useState(emptyDraft);
@@ -148,29 +174,74 @@ export function MutationPanel({
   const [localError, setLocalError] = useState("");
   const [aiBusy, setAIBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [deferred, setDeferred] = useState(false);
+  const [localRecovery] = useState(() => {
+    if (recovery) return { saved: null, error: false };
+    try {
+      return { saved: readChangeRecovery(), error: false };
+    } catch {
+      return { saved: null, error: true };
+    }
+  });
+  const localPending =
+    !recovery &&
+    localRecovery.saved?.invocationId === null &&
+    localRecovery.saved.workspaceId === workspaceId &&
+    localRecovery.saved.sourceId === sourceId
+      ? localRecovery.saved.confirmation
+      : undefined;
+  const otherPending = !recovery && !!localRecovery.saved && !localPending;
+  const localPersistence = useMemo(() => {
+    const base = { invocationId: null, workspaceId, sourceId };
+    return {
+      save: (confirmation: Confirmation) => saveChangeRecovery({ ...base, confirmation }),
+      clear: (confirmation: Confirmation) => clearChangeRecovery({ ...base, confirmation }),
+      canDefer: (confirmation: Confirmation) =>
+        sameChangeRecovery(readChangeRecovery(), { ...base, confirmation }),
+    };
+  }, [workspaceId, sourceId]);
+  const persistence = recovery ?? localPersistence;
+  const pendingAtMount = restoredPending ?? localPending;
   const controller = useRef<MutationController | null>(null);
   const busyListener = useRef(onBusyChange);
   busyListener.current = onBusyChange;
   useEffect(() => {
-    const instance = new MutationController(mutationClient(workspaceId, sourceId), setView);
+    const instance = new MutationController(
+      mutationClient(workspaceId, sourceId, { originInvocationId }),
+      setView,
+      undefined,
+      persistence,
+    );
     controller.current = instance;
     setView(initialMutationView());
-    setDraft(emptyDraft());
+    setDraft(initialPlan ? draftFromPlan(initialPlan) : emptyDraft());
     setConfirming(false);
     setRecovering(false);
     setAcknowledged(false);
     setTypedTable("");
     setLocalError("");
     setAIBusy(false);
-    void instance.prepare();
+    if (pendingAtMount) void instance.restorePending(pendingAtMount);
+    else void instance.prepare();
     return () => {
       instance.close();
       if (controller.current === instance) controller.current = null;
     };
-  }, [workspaceId, sourceId]);
+  }, [workspaceId, sourceId, initialPlan, originInvocationId, pendingAtMount, persistence]);
+  const pendingId = view.pending?.confirmationId;
   useEffect(() => {
-    busyListener.current?.(view.busy || confirming || recovering || aiBusy);
-  }, [view.busy, confirming, recovering, aiBusy]);
+    if (pendingId) setDeferred(false);
+  }, [pendingId]);
+  useEffect(() => {
+    busyListener.current?.(
+      view.busy ||
+        confirming ||
+        recovering ||
+        aiBusy ||
+        (view.phase === "reconciling" && !deferred) ||
+        view.phase === "confirming",
+    );
+  }, [view.busy, view.phase, confirming, recovering, aiBusy, deferred]);
   useEffect(() => () => busyListener.current?.(false), []);
   const selectedId = view.selected?.executionId;
   const selectedState = view.selected?.state;
@@ -195,12 +266,22 @@ export function MutationPanel({
     return () => window.clearInterval(timer);
   }, [view.phase, previewId]);
   const blocked = unavailable || interactionBlocked || view.busy || aiBusy;
+  const recoveryBlocked = interactionBlocked || view.busy || aiBusy;
   const frozen =
     isFrozen(view.records) || view.receiptMetadataError || view.capability?.code === "frozen";
-  const canDraft = !!controller.current?.canDraft() && !unavailable && !interactionBlocked;
+  const canDraft =
+    !!controller.current?.canDraft() &&
+    !unavailable &&
+    !interactionBlocked &&
+    !previewUnavailable &&
+    !localRecovery.error &&
+    !otherPending;
   const p = view.preview;
   const canConfirm =
     !blocked &&
+    !previewUnavailable &&
+    !localRecovery.error &&
+    !otherPending &&
     !frozen &&
     view.phase === "preview" &&
     mayConfirm(p, view.capability, acknowledged, typedTable, now);
@@ -240,6 +321,16 @@ export function MutationPanel({
           正在核对当前数据源的写入能力…
         </p>
       )}
+      {view.capabilityLoading && <p role="status">正在核对 Connector 能力，执行历史可独立读取。</p>}
+      {view.capabilityError && (
+        <p role="status">
+          {view.capabilityAccessError === "login_required"
+            ? "登录已过期，请保留原编号并重新登录后核对能力。"
+            : view.capabilityAccessError === "access_denied"
+              ? "当前账号无权读取数据源能力，请检查账号及权限。"
+              : "Connector 能力暂不可用；仍可核对已登记的执行历史和原确认。"}
+        </p>
+      )}
       {view.capability &&
         (!view.capability.enabled ||
           !view.capability.available ||
@@ -248,21 +339,35 @@ export function MutationPanel({
             <LockKeyhole size={18} />
             <div>
               <strong>
-                {frozen
-                  ? "该目标的新写入已冻结"
-                  : !view.capability.executionEnabled
-                    ? "正式写入尚未开放"
-                    : "当前数据源尚不具备写入条件"}
+                {view.capability.code === "binding_identity_required"
+                  ? "需先由管理员完成绑定身份迁移"
+                  : frozen
+                    ? "该目标的新写入已冻结"
+                    : !view.capability.executionEnabled
+                      ? "正式写入尚未开放"
+                      : "当前数据源尚不具备写入条件"}
               </strong>
               <p>
-                {frozen
-                  ? "存在未决或不一致证据。请核对原结果；找回记录不会自动解冻。"
-                  : "只有本机授权、安全核验和阶段验收全部满足后，才允许确认执行。界面不会绕过这项限制。"}
+                {view.capability.code === "binding_identity_required"
+                  ? "当前平台库尚未安装绑定身份记录，新预览与写入已关闭。请由管理员按迁移文档核对所选环境；这里不会自动修改数据库。"
+                  : frozen
+                    ? "存在未决或不一致证据。请核对原结果；找回记录不会自动解冻。"
+                    : "只有本机授权、安全核验和阶段验收全部满足后，才允许确认执行。界面不会绕过这项限制。"}
               </p>
             </div>
           </div>
         )}
-      {!view.recovered && view.phase !== "loading" && (
+      {localRecovery.error && (
+        <p role="alert">
+          无法读取本标签页的待核对记录，状态未知。当前不能开始新的变更，请恢复浏览器存储权限。
+        </p>
+      )}
+      {otherPending && (
+        <p role="alert">
+          本标签页已有另一项待核对确认，请先回到其原工作区和数据源核对，不能开始新的变更。
+        </p>
+      )}
+      {!view.recovered && view.phase === "recovery" && (
         <div className="mut-recovery-start">
           <FileCheck2 size={22} />
           <div>
@@ -359,6 +464,9 @@ export function MutationPanel({
               disabled={
                 blocked ||
                 frozen ||
+                previewUnavailable ||
+                localRecovery.error ||
+                otherPending ||
                 !view.capability?.executionEnabled ||
                 Date.parse(p.expiresAt) <= now
               }
@@ -387,7 +495,7 @@ export function MutationPanel({
             <Button
               className="outline-button"
               type="button"
-              disabled={blocked}
+              disabled={recoveryBlocked}
               onClick={() => void controller.current?.lookup()}
             >
               核对原确认
@@ -395,15 +503,39 @@ export function MutationPanel({
             <Button
               className="outline-button"
               type="button"
-              disabled={blocked}
+              disabled={recoveryBlocked}
               onClick={() => void controller.current?.lookup(true)}
             >
               结束待核对确认
             </Button>
+            {persistence && (
+              <Button
+                className="outline-button"
+                type="button"
+                disabled={recoveryBlocked}
+                onClick={() => {
+                  try {
+                    if (!view.pending || !persistence.canDefer(view.pending))
+                      throw Error("不可恢复");
+                    if (onDefer) onDefer();
+                    else setDeferred(true);
+                  } catch {
+                    setLocalError("无法保留原确认编号，请留在本页继续核对。");
+                  }
+                }}
+              >
+                保留编号，稍后核对
+              </Button>
+            )}
           </div>
           <small>
             结束操作会封存尚未登记的原预览；已经登记时返回原执行记录，不会取消数据库任务。
           </small>
+          {persistence && (
+            <p>
+              编号仅保存在本浏览器当前标签页，关闭标签页或清除站点数据后可能丢失；请记录上面的编号。
+            </p>
+          )}
         </section>
       )}
       {view.selected && (
@@ -413,6 +545,28 @@ export function MutationPanel({
           onRefresh={() => void controller.current?.refresh()}
           onCancel={() => void controller.current?.cancel()}
         />
+      )}
+      {view.recordsLoaded && view.historySelected && (
+        <>
+          <p>以下为上次读取的历史快照，可能已经变化；查看快照不会改变原确认。</p>
+          <ExecutionRecord
+            record={view.historySelected}
+            busy={false}
+            onRefresh={() => {}}
+            onCancel={() => {}}
+            readOnly
+          />
+        </>
+      )}
+      {view.phase === "execution" && (
+        <Button
+          type="button"
+          className="outline-button"
+          disabled={recoveryBlocked}
+          onClick={() => void controller.current?.prepare()}
+        >
+          返回找回操作
+        </Button>
       )}
       {view.phase === "execution" && view.selected && terminalStates.has(view.selected.state) && (
         <Button
@@ -424,18 +578,37 @@ export function MutationPanel({
           编写新的变更草稿
         </Button>
       )}
-      <RecentExecutions
-        records={view.records}
-        busy={
-          blocked ||
-          view.phase === "preview" ||
-          view.phase === "reconciling" ||
-          view.phase === "confirming"
-        }
-        nextCursor={view.nextCursor}
-        onOpen={(id) => void controller.current?.refresh(id)}
-        onMore={() => void controller.current?.more()}
-      />
+      {view.recordsLoaded ? (
+        <RecentExecutions
+          records={view.records}
+          busy={recoveryBlocked || view.phase === "preview" || view.phase === "confirming"}
+          nextCursor={view.nextCursor}
+          onOpen={(id) => controller.current?.inspectHistory(id)}
+          onMore={() => void controller.current?.more()}
+          snapshot={view.phase === "reconciling"}
+          onReload={() => void controller.current?.retryHistory()}
+        />
+      ) : (
+        <div role="status">
+          <p>执行历史尚未加载或不可用，不能据此判断没有记录。</p>
+          <Button
+            className="outline-button"
+            type="button"
+            disabled={recoveryBlocked || view.phase === "confirming"}
+            onClick={() => void controller.current?.retryHistory()}
+          >
+            重新读取执行历史
+          </Button>
+        </div>
+      )}
+      {view.historyError === "login_required" && (
+        <p role="alert">执行历史需要重新登录；保留原编号，登录后可以重新读取。</p>
+      )}
+      {view.historyError === "access_denied" && (
+        <p role="alert">
+          当前账号无权读取执行历史；请检查账号和数据源权限，恢复权限后可以重新读取。
+        </p>
+      )}
       <RecoveredReceipts
         receipts={view.receipts}
         cursor={view.receiptCursor}
@@ -456,7 +629,7 @@ export function MutationPanel({
       <ConfirmDialog
         open={confirming && !!p}
         title={p?.operation === "delete" ? "确认删除全部目标？" : "确认本次数据变更？"}
-        description={`数据源：${sourceName}；目标表：${p?.table ?? ""}；${p ? operationLabels[p.operation] : ""} ${p?.rowCount ?? 0} 行。确认只适用于当前预览，不是提交成功的回执。`}
+        description={`${showScopeIdentity ? `工作区：${workspaceId}；` : ""}数据源：${sourceName}；目标表：${p?.table ?? ""}；${p ? operationLabels[p.operation] : ""} ${p?.rowCount ?? 0} 行。确认只适用于当前预览，不是提交成功的回执。`}
         confirmLabel="确认登记本次变更"
         confirmDisabled={!canConfirm}
         busy={view.busy}

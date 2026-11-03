@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { OperationalError, operationalMessages } from "../operational-error.js";
+import { externalMcpDiagnosticCodes } from "../mcp-client/public.js";
 
 export type DiagnosticLevel = "debug" | "info" | "warn" | "error";
 export interface DiagnosticFields {
@@ -10,6 +11,8 @@ export interface DiagnosticFields {
   connectorId?: string;
   taskId?: string;
   executionId?: string;
+  externalConnectionId?: string;
+  externalCallId?: string;
   code?: string;
   state?: string;
   operation?: string;
@@ -28,6 +31,8 @@ const ids = [
   "connectorId",
   "taskId",
   "executionId",
+  "externalConnectionId",
+  "externalCallId",
 ] as const;
 const states = new Set([
   "queued",
@@ -141,6 +146,7 @@ export function safeError(error: unknown): Record<string, unknown> {
   }
 }
 const errorCodes = new Set([
+  ...externalMcpDiagnosticCodes,
   "EACCES",
   "EPERM",
   "EADDRINUSE",

@@ -70,7 +70,10 @@ export const mutationPlanSchema = z.discriminatedUnion("operation", [
 export type MutationPlan = z.infer<typeof mutationPlanSchema>;
 export type MutationScope = { ownerId: string; workspaceId: string; sourceId: string };
 export type MutationIdentity = { ownerId: string; sessionId: string };
-export type MutationBinding = MutationScope & { connectorId: string };
+export type MutationBinding = MutationScope & {
+  connectorId: string;
+  bindingGeneration?: string | null;
+};
 
 export const mutationStates = [
   "registered",

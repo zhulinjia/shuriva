@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import type { INestApplication } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
@@ -51,6 +51,13 @@ import { MutationService } from "./mutations/service.js";
 import { MutationStore } from "./mutations/store.js";
 import { MutationAIPlanner } from "./mutations/ai/planner.js";
 import { mountMutationAIRoutes } from "./mutations/ai/routes.js";
+import { createMcpRuntime, type McpConfig } from "./mcp/runtime.js";
+import { bindingIdentitiesAvailable } from "./datasources/binding-migration.js";
+import { mountMcpManagement, mountMcpOAuth, type McpManagement } from "./mcp/routes.js";
+import { createMcpDatabase } from "./auth/public.js";
+import { createExternalRuntime } from "./mcp-client/runtime.js";
+import type { ExternalConfig } from "./mcp-client/config.js";
+import { mountExternalMcp, type ExternalManagement } from "./mcp-client/routes.js";
 
 export async function createApp(
   options: {
@@ -70,6 +77,8 @@ export async function createApp(
       closed: boolean;
     };
     shutdownHooks?: boolean;
+    mcpConfig?: McpConfig;
+    externalMcpConfig?: ExternalConfig;
   } = {},
 ): Promise<INestApplication> {
   const logger =
@@ -84,6 +93,11 @@ export async function createApp(
       throw new Error("stage 7 requires stage 6");
     if (options.stage8Enabled && !options.stage7Enabled)
       throw new Error("stage 8 requires stage 7");
+    if (
+      (options.mcpConfig || options.externalMcpConfig) &&
+      (!options.stage7Enabled || !options.connectorStatePath || !options.auth)
+    )
+      throw new Error("MCP requires authenticated stage 7 and Connector state");
     const app = await NestFactory.create(AppModule, {
       abortOnError: false,
       logger: options.logger === false ? false : frameworkDiagnostics(logger),
@@ -93,6 +107,7 @@ export async function createApp(
     if (options.auth) {
       const pool = createDatabase(options.auth.databaseUrl);
       let database: Awaited<ReturnType<typeof verifyDatabaseCurrent>>;
+      let bindingIdentities = false;
       try {
         database = await verifyDatabaseCurrent(
           pool,
@@ -101,6 +116,14 @@ export async function createApp(
           options.stage7Enabled === true,
           options.stage8Enabled === true,
         );
+        if (database.hasMutations) {
+          const c = await pool.getConnection();
+          try {
+            bindingIdentities = await bindingIdentitiesAvailable(c);
+          } finally {
+            c.release();
+          }
+        }
       } catch (error) {
         await pool.end();
         await app.close();
@@ -108,6 +131,9 @@ export async function createApp(
       }
       const auth = createAuth(options.auth, pool);
       const server = app.getHttpAdapter().getInstance() as Express;
+      let mcp: (McpManagement & { close(): Promise<void> }) | undefined;
+      let external: ExternalManagement | undefined;
+      mountMcpOAuth(server, options.auth.origin, () => mcp);
       if (options.diagnosticHealth)
         server.get("/api/diagnostics/logging", async (req, res) => {
           if (!(await authOwner(auth)(req.headers))) {
@@ -117,7 +143,9 @@ export async function createApp(
           res.setHeader("Cache-Control", "no-store");
           res.json(options.diagnosticHealth?.());
         });
-      const dataSources = database.hasStage3 ? new DataSourceStore(pool) : undefined;
+      const dataSources = database.hasStage3
+        ? new DataSourceStore(pool, bindingIdentities)
+        : undefined;
       const history =
         options.stage7Enabled && database.hasHistory && dataSources
           ? new HistoryStore(pool, dataSources)
@@ -139,6 +167,8 @@ export async function createApp(
         throw error;
       }
       audit?.install(app.getHttpAdapter().getInstance() as Express, authOwner(auth));
+      mountMcpManagement(server, options.auth.origin, () => mcp);
+      mountExternalMcp(server, options.auth.origin, () => external);
       let readService: ReadService | undefined;
       let scopeCoordinator: ScopeCoordinator | undefined;
       mountProductRoutes(
@@ -175,6 +205,8 @@ export async function createApp(
         );
         let activeRegistry: ConnectorRegistry | undefined;
         let initializingAudit = false;
+        let initializingMcp = false;
+        const mcpPools: ReturnType<typeof createMcpDatabase>[] = [];
         try {
           const registry = await ConnectorRegistry.open(statePath, () => registrySecret(statePath));
           activeRegistry = registry;
@@ -213,16 +245,21 @@ export async function createApp(
               store,
               randomBytes(32).toString("hex"),
               authSessionReferenceActive,
+              bindingIdentities,
             );
             const channel = new ConnectorMutationTransport(registry, access);
-            const enabled = options.stage8Enabled === true && database.hasMutations;
+            const requested = options.stage8Enabled === true && database.hasMutations;
+            const enabled = requested;
             // G3 ships implementation without granting the G4 production opening.
             const service = new MutationService(
               mutations,
               access,
               channel,
               { sign: async (payload) => registry.signMutationPermit(payload) },
-              { enabled, executionEnabled: false },
+              {
+                enabled,
+                executionEnabled: false,
+              },
             );
             channel.onExecutionResult(async (binding, expected, result) => {
               await service.result(binding, expected.executionId, result);
@@ -258,6 +295,32 @@ export async function createApp(
               options.auth.origin,
               access,
               service,
+              {
+                verify: (who, scope, id, plan) => {
+                  if (!mcp) throw Error("MCP_ORIGIN_UNAVAILABLE");
+                  return mcp.invocations.verifyChangeOrigin({
+                    id,
+                    ...scope,
+                    sessionId: who.sessionId,
+                    plan,
+                  });
+                },
+                record: async (who, scope, proof, previewId) => {
+                  if (!history) throw Error("AUDIT_UNAVAILABLE");
+                  await history.appendAudit(
+                    who.ownerId,
+                    scope,
+                    {
+                      event: "mcp.change_preview_origin_verified",
+                      outcome: "success",
+                      mcpInvocationId: proof.invocationId,
+                      mcpPlanChanged: proof.planChanged,
+                      targetId: previewId,
+                    },
+                    previewId,
+                  );
+                },
+              },
             );
             if (enabled) {
               await mutations.recoverPreviousBoot();
@@ -345,7 +408,85 @@ export async function createApp(
               semantics,
               audit,
             );
+          if (options.mcpConfig && readService && scopeCoordinator) {
+            initializingMcp = true;
+            const sdk = createMcpDatabase(options.auth.databaseUrl),
+              observation = createMcpDatabase(options.auth.databaseUrl),
+              storage = createMcpDatabase(options.auth.databaseUrl);
+            mcpPools.push(sdk, observation, storage);
+            const key = Buffer.from(registrySecret(statePath, "shuriva-mcp-approval"), "hex");
+            try {
+              const runtime = await createMcpRuntime({
+                config: options.mcpConfig,
+                auth: options.auth,
+                pools: { sdk, observation, storage },
+                coordinator: scopeCoordinator,
+                reads: readService,
+                key,
+                audit: async (owner, id, tool) => {
+                  if (!audit) throw new Error("AUDIT_UNAVAILABLE");
+                  audit.record(owner, {
+                    event: tool
+                      ? tool.phase === "requested"
+                        ? "mcp.tool_requested"
+                        : "mcp.tool_disclosure_authorized"
+                      : "mcp.invocation_registered",
+                    ...(tool
+                      ? {
+                          mcpTool: tool.name,
+                          mcpGrantId: tool.grantId,
+                          mcpClientId: tool.clientId,
+                          ...(tool.invocationId ? { mcpInvocationId: tool.invocationId } : {}),
+                        }
+                      : {}),
+                    targetId: id,
+                    outcome: "success",
+                  });
+                },
+              });
+              mcp = { ...runtime, authenticate: authMutationIdentity(auth) };
+            } finally {
+              key.fill(0);
+            }
+            initializingMcp = false;
+          }
+          if (options.externalMcpConfig) {
+            initializingMcp = true;
+            const storage = createMcpDatabase(options.auth.databaseUrl),
+              admission = createMcpDatabase(options.auth.databaseUrl);
+            mcpPools.push(storage, admission);
+            const service = await createExternalRuntime(
+              options.externalMcpConfig,
+              storage,
+              admission,
+              async (owner, event, workspaceId, connectionId, callId, state) => {
+                if (!audit) throw Error("AUDIT_UNAVAILABLE");
+                audit.record(owner, {
+                  event: `mcp.external.${event}`,
+                  outcome:
+                    state === "outcome_unknown"
+                      ? "unknown"
+                      : state === "failed"
+                        ? "failure"
+                        : "success",
+                  attemptedWorkspaceId: workspaceId,
+                  externalConnectionId: connectionId,
+                  ...(callId ? { externalCallId: callId } : {}),
+                  ...(state ? { externalCallState: state } : {}),
+                });
+              },
+              createHash("sha256")
+                .update("shuriva-external-host\0")
+                .update(registrySecret(statePath, "shuriva-external-host"))
+                .digest("hex"),
+            );
+            external = { service, authenticate: authMutationIdentity(auth) };
+            initializingMcp = false;
+          }
           app.getHttpServer().once("close", () => {
+            void Promise.all([mcp?.close(), external?.service.close()]).finally(() =>
+              Promise.all(mcpPools.map((p) => p.end())),
+            );
             void registry.close();
             readService?.close();
           });
@@ -353,7 +494,10 @@ export async function createApp(
           audit?.close();
           readService?.close();
           await activeRegistry?.close();
-          if (initializingAudit) {
+          await mcp?.close();
+          await external?.service.close();
+          await Promise.all(mcpPools.map((p) => p.end()));
+          if (initializingAudit || initializingMcp) {
             await pool.end();
             await app.close();
             throw error;

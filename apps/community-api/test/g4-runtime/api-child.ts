@@ -20,6 +20,12 @@ import { MutationService } from "../../src/mutations/service.js";
 import { MutationStore } from "../../src/mutations/store.js";
 import { mountMutationRoutes } from "../../src/mutations/routes.js";
 import { isolatedMysql } from "../isolated-mysql.js";
+import { createMcpRuntime } from "../../src/mcp/runtime.js";
+import { migrateMcpSchema } from "../../src/mcp/migration.js";
+import { mountMcpManagement, mountMcpOAuth } from "../../src/mcp/routes.js";
+import { ReadService } from "../../src/queries/service.js";
+import { authSessionAccess } from "../../src/auth.js";
+import { scanHooks } from "../../src/datasources/scan.js";
 
 export interface RuntimeConfig {
   database: string;
@@ -30,12 +36,23 @@ export interface RuntimeConfig {
   ownerId: string;
   workspaceId: string;
   sourceId: string;
+  mcp?: boolean;
+  mcpChangeDrafts?: boolean;
 }
 type Command = { id: number; action: string; data?: unknown };
+process.on("uncaughtException", (error) => {
+  const message = /^[A-Z][A-Z0-9_]{1,80}$/.test(error.message) ? error.message : "UNCLASSIFIED";
+  process.stderr.write(`G4_FATAL_${message}\n`);
+  process.exit(1);
+});
 if (process.env.STAGE8_G4_ACCEPTANCE !== "1" || !process.send)
   throw Error("explicit isolated acceptance IPC required");
 const send = (value: unknown) => process.send?.(value);
-const [message] = await once(process, "message");
+// ESM SDK loading may finish after the parent has forked. Ask for the
+// configuration only after a receiver exists, so IPC cannot be lost at startup.
+const configuration = once(process, "message");
+send({ configurationReady: true });
+const [message] = await configuration;
 const config = message as RuntimeConfig;
 assert.match(config.database, /^g3_mut_api_[0-9a-f]{16}$/);
 assert.equal(config.origin, "http://127.0.0.2:5193");
@@ -51,7 +68,7 @@ const auth = createAuth(
   },
   pool,
 );
-const sources = new DataSourceStore(pool);
+const sources = new DataSourceStore(pool, true);
 const history = new HistoryStore(pool, sources);
 const coordinator = new ScopeCoordinator(sources, registry);
 const access = {
@@ -63,6 +80,7 @@ const store = new MutationStore(
   sources,
   randomBytes(32).toString("hex"),
   authSessionReferenceActive,
+  true,
 );
 const channel = new ConnectorMutationTransport(registry, access);
 const service = new MutationService(
@@ -78,6 +96,58 @@ channel.onExecutionResult((binding, execution, outcome) =>
 let fault = "";
 let release: (() => void) | undefined;
 const app = express();
+const reads = config.mcp
+  ? new ReadService(sources, registry, authSessionAccess(auth, pool), undefined, coordinator)
+  : undefined;
+const mcpPools = config.mcp
+  ? {
+      sdk: isolated.pool(config.database),
+      observation: isolated.pool(config.database),
+      storage: isolated.pool(config.database),
+    }
+  : undefined;
+if (config.mcp) await migrateMcpSchema(pool);
+const mcp =
+  config.mcp && mcpPools && reads
+    ? await createMcpRuntime({
+        config: { resource: "http://127.0.0.1:43131/mcp", host: "127.0.0.1", port: 43131 },
+        auth: {
+          databaseUrl: "mysql://unused:unused@127.0.0.1:13308/unused",
+          secret: config.secret,
+          origin: config.origin,
+        },
+        pools: mcpPools,
+        coordinator,
+        reads,
+        key: Buffer.from(config.secret, "hex"),
+        changeDraftsEnabled: config.mcpChangeDrafts === true,
+        audit: async (owner, id, tool) =>
+          history
+            .appendAudit(owner, null, {
+              event: tool
+                ? tool.phase === "requested"
+                  ? "mcp.tool_requested"
+                  : "mcp.tool_disclosure_authorized"
+                : "mcp.invocation_registered",
+              ...(tool
+                ? {
+                    mcpTool: tool.name,
+                    mcpGrantId: tool.grantId,
+                    mcpClientId: tool.clientId,
+                    ...(tool.invocationId ? { mcpInvocationId: tool.invocationId } : {}),
+                  }
+                : {}),
+              targetId: id,
+              outcome: "success",
+            })
+            .then(() => {}),
+      })
+    : undefined;
+if (mcp) {
+  const management = () => ({ ...mcp, authenticate: authMutationIdentity(auth) });
+  mountMcpOAuth(app, config.origin, management);
+  mountMcpManagement(app, config.origin, management);
+}
 app.use(async (req, res, next) => {
   if (fault === "heartbeat-drop" && req.path === "/api/connector-agent/heartbeat") {
     fault = "";
@@ -109,10 +179,36 @@ mountProductRoutes(app, auth, pool, config.origin);
 mountMutationAgentRoutes(app, registry, channel, service);
 const owner = async (headers: Parameters<typeof access.authenticate>[0]) =>
   (await access.authenticate(headers))?.ownerId;
-mountConnectorRoutes(app, registry, config.origin, owner);
-mountDataSourceRoutes(app, sources, registry, config.origin, owner, coordinator);
+mountConnectorRoutes(
+  app,
+  registry,
+  config.origin,
+  owner,
+  reads ? scanHooks(sources, registry) : undefined,
+  reads,
+);
+mountDataSourceRoutes(app, sources, registry, config.origin, owner, coordinator, reads);
 mountHistoryRoutes(app, owner, config.origin, history, undefined);
-mountMutationRoutes(app, config.origin, access, service);
+mountMutationRoutes(app, config.origin, access, service, {
+  verify: (who, scope, id, plan) => {
+    if (!mcp) throw Error("MCP_ORIGIN_UNAVAILABLE");
+    return mcp.invocations.verifyChangeOrigin({ id, ...scope, sessionId: who.sessionId, plan });
+  },
+  record: async (who, scope, proof, previewId) => {
+    await history.appendAudit(
+      who.ownerId,
+      scope,
+      {
+        event: "mcp.change_preview_origin_verified",
+        outcome: "success",
+        mcpInvocationId: proof.invocationId,
+        mcpPlanChanged: proof.planChanged,
+        targetId: previewId,
+      },
+      previewId,
+    );
+  },
+});
 const server = app.listen(config.port, "127.0.0.1");
 await once(server, "listening");
 send({ ready: true });
@@ -153,6 +249,9 @@ async function close() {
   closing = true;
   process.stderr.write("G4_CLOSE_BEGIN\n");
   release?.();
+  await mcp?.close();
+  reads?.close();
+  if (mcpPools) await Promise.all(Object.values(mcpPools).map((p) => p.end()));
   channel.close();
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));

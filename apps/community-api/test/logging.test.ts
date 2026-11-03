@@ -42,8 +42,24 @@ test("diagnostic allowlist omits secret bodies, credentials and error messages w
   assert.ok(Array.isArray(record.locations));
   assert.equal(JSON.stringify(record.locations).includes("example.js"), false);
   assert.equal(lines.join("").includes(canary), false);
+  logger.error(
+    "query.failed",
+    {},
+    Object.assign(new Error(canary), { code: "EXTERNAL_MCP_DISCOVERY_SAFETY_UNAVAILABLE" }),
+  );
+  assert.equal(
+    JSON.parse(lines.at(-1) ?? "{}").errorCode,
+    "EXTERNAL_MCP_DISCOVERY_SAFETY_UNAVAILABLE",
+  );
   assert.equal(lines.join("").includes("I:/workspace"), false);
   assert.equal(JSON.parse(lines[1]).event, "diagnostic.invalid_event");
+  logger.error(
+    "query.failed",
+    {},
+    Object.assign(new Error(canary), { code: "EXTERNAL_MCP_CALL_SAFETY_UNAVAILABLE" }),
+  );
+  assert.equal(JSON.parse(lines.at(-1) ?? "{}").errorCode, "EXTERNAL_MCP_CALL_SAFETY_UNAVAILABLE");
+  assert.equal(lines.join("").includes(canary), false);
   logger.info("query.result_received", { state: "ok", operation: "read_query" });
   const success = JSON.parse(lines[lines.length - 1]);
   assert.equal(success.state, "ok");

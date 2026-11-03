@@ -43,3 +43,12 @@ export function databaseConnectionOptions(raw: string): PoolOptions {
 export function createDatabase(url: string) {
   return createPool(databaseConnectionOptions(url));
 }
+/** No queue and no shared-session options with ordinary application work. */
+export function createMcpDatabase(url: string) {
+  return createPool({
+    ...databaseConnectionOptions(url),
+    connectionLimit: 8,
+    waitForConnections: false,
+    queueLimit: 0,
+  });
+}
