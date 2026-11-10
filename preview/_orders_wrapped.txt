@@ -1,0 +1,12 @@
+28: A.makeOrders = sourceId => Array.from({length:48},(_,i)=>({
+29:   id:(sourceId==='orders'?'ORD':sourceId==='orders-test'?'TEST':'DEMO-'+sourceId.slice(-4).toUpperCase())+'-261108-'+(1048-i),
+29: customerId:'CUS-'+(1001+i%8),customer:A.names[i%8],
+30:   email:['yining.chen','yuan.lin','zhiyuan.wang','kexin.zhang','yihang.zhou','muqing.li','shuyan.zhao','yichen.xu'][i%8]+'@example.com',
+31:   phone:'138'+String(20105678+i%8).padStart(8,'0'),amount:[899,129,249,1299,499,199,2499,59][i%8],cost:[420,60,95,680,230,90,1100,20][i%8],
+32:   channel:['微信支付','支付宝','Stripe'][i%3],status:['履约超时','履约失败','状态不一致','已完成'][i%4],
+33:   createdAt:new
+33: Date(Date.parse(A.now)-i*5*3600000).toISOString(),store:i%2?'上海门店':'杭州门店',assignee:i%3===0?'support-01':'support-02',product:['专业版年费','团队版月费','API
+33: 用量包'][i%3]
+34: }));
+35: A.makeMembers = sourceId =>
+35: A.names.map((name,i)=>({id:'CUS-'+(1001+i),name,email:['yining.chen','yuan.lin','zhiyuan.wang','kexin.zhang','yihang.zhou','muqing.li','shuyan.zhao','yichen.xu'][i]+'@example.com',phone:'138'+String(20105678+i),plan:i%3===0?'团队版':'专业版',store:i%2?'上海门店':'杭州门店',assignee:i%3===0?'support-01':'support-02',registered:'2026-08-'+String(10+i).padStart(2,'0'),sourceId}));

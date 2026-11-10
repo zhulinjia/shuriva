@@ -1,0 +1,7 @@
+{
+  "extends": "../server/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["server/**/*.ts", "browser-fixture.ts"]
+}

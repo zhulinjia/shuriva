@@ -1,0 +1,405 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+@import "tw-shimmer";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  color-scheme: light;
+
+  --radius: 0.625rem;
+
+  /* Surface layering: warm paper canvas → white surface → sand subtle surface */
+  --background: #faf8f3;
+  --foreground: #2b2925;
+  --card: #ffffff;
+  --card-foreground: #2b2925;
+  --popover: #ffffff;
+  --popover-foreground: #2b2925;
+
+  /* Brand action: institutional ink navy */
+  --primary: #1e3a5f;
+  --primary-foreground: #ffffff;
+  --primary-hover: #172e4c;
+
+  --secondary: #f2ede4;
+  --secondary-foreground: #2b2925;
+  --muted: #f2ede4;
+  --muted-foreground: #6b655a;
+  --accent: #efe9de;
+  --accent-foreground: #2b2925;
+
+  --destructive: #a84a48;
+  --destructive-soft: #fff2f0;
+  --destructive-border: #f2d7d4;
+
+  /* Semantic states */
+  --success: #237e67;
+  --success-soft: #edf7f1;
+  --success-border: #cfe7da;
+  --warning: #84601f;
+  --warning-soft: #fff8eb;
+  --warning-border: #f0e0be;
+  --info: #466f8d;
+  --info-soft: #eef5fa;
+  --info-border: #d8e6f1;
+
+  --border: #e4ddd0;
+  --input: #8a8375;
+  --ring: #1e3a5f;
+
+  /* Data series: ink navy, amber, teal, violet, rose */
+  --chart-1: #1e3a5f;
+  --chart-2: #b45309;
+  --chart-3: #0f766e;
+  --chart-4: #6d4aa8;
+  --chart-5: #9f1239;
+
+  --sidebar: #f2ece1;
+  --sidebar-foreground: #2b2925;
+  --sidebar-primary: #1e3a5f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e6decf;
+  --sidebar-accent-foreground: #1e3a5f;
+  --sidebar-border: #e4ddd0;
+  --sidebar-ring: #1e3a5f;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --primary-hover: oklch(0.87 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", "PingFang SC", "Microsoft YaHei",
+    "Noto Sans SC", system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+
+  /* Project breakpoints */
+  --breakpoint-wide: 1750px;
+  --breakpoint-desk: 1250px;
+  --breakpoint-compact: 980px;
+  --breakpoint-mobile: 700px;
+
+  /* Layout dimensions */
+  --spacing-topbar: 56px;
+  --spacing-page: 1480px;
+  --spacing-editor-panel: 320px;
+  --spacing-workspace-aside: 260px;
+  --spacing-row: 44px;
+
+  /* Type scale */
+  --text-display: 1.75rem;
+  --text-display--line-height: 1.2;
+  --text-display--letter-spacing: -0.02em;
+  --text-page-title: 1.5rem;
+  --text-page-title--line-height: 1.3;
+  --text-page-title--letter-spacing: -0.015em;
+  --text-section-title: 1.125rem;
+  --text-section-title--line-height: 1.4;
+  --text-card-title: 0.9375rem;
+  --text-card-title--line-height: 1.45;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.55;
+  --text-table: 0.8125rem;
+  --text-table--line-height: 1.5;
+  --text-nav: 0.8125rem;
+  --text-nav--line-height: 1.4;
+  --text-label: 0.75rem;
+  --text-label--line-height: 1.4;
+  --text-caption: 0.6875rem;
+  --text-caption--line-height: 1.45;
+  --text-number: 1.6875rem;
+  --text-number--line-height: 1.1;
+  --text-number--letter-spacing: -0.02em;
+
+  /* Radius scale: 6 / 8 / 10 / 12 */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 2px);
+
+  /* Restrained elevation, tinted with the foreground hue */
+  --shadow-raised: 0 1px 2px rgb(45 36 24 / 0.06),
+    0 2px 8px rgb(45 36 24 / 0.04);
+  --shadow-dialog: 0 16px 48px rgb(45 36 24 / 0.18),
+    0 2px 8px rgb(45 36 24 / 0.08);
+  --shadow-toast: 0 4px 20px rgb(45 36 24 / 0.12);
+
+  /* shadcn/ui semantic colors */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-soft: var(--destructive-soft);
+  --color-destructive-border: var(--destructive-border);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-border: var(--success-border);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-border: var(--warning-border);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-border: var(--info-border);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(
+        --radix-collapsible-content-height,
+        var(--collapsible-panel-height, auto)
+      );
+    }
+  }
+  @keyframes collapsible-up {
+    from {
+      height: var(
+        --radix-collapsible-content-height,
+        var(--collapsible-panel-height, auto)
+      );
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring;
+  }
+
+  html {
+    @apply font-sans;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    margin: 0;
+    min-width: 320px;
+    font-size: var(--text-body);
+    line-height: 1.55;
+  }
+
+  #root {
+    min-height: 100svh;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 20%, transparent);
+    color: var(--foreground);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@custom-variant data-open (&:where([data-state="open"], [data-open]:not([data-open="false"])));
+
+@custom-variant data-closed (&:where([data-state="closed"], [data-closed]:not([data-closed="false"])));
+
+/* The split view keeps the footer inside its scrollable canvas. */
+#main-content:has(.workspace-split) + .app-shell-footer {
+  display: none;
+}
+
+/* The AI panel is part of the workspace shell, not an inset card. */
+.workspace-split {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: calc(100svh - var(--spacing-topbar));
+  overflow: hidden;
+}
+
+.workspace-split-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.workspace-split-sidebar {
+  min-width: 0;
+  min-height: 0;
+  width: var(--ai-panel-width);
+  flex: 0 0 var(--ai-panel-width);
+  overflow: hidden;
+  background: var(--card);
+}
+
+.workspace-split-separator {
+  position: relative;
+  width: 7px;
+  flex: 0 0 7px;
+  cursor: col-resize;
+  touch-action: none;
+  background: var(--border);
+}
+
+.workspace-split-separator::after {
+  content: "";
+  position: absolute;
+  inset: 0 3px;
+  background: var(--card);
+}
+
+.workspace-split-separator:hover::after,
+.workspace-split-separator:focus-visible::after {
+  background: var(--primary);
+}
+
+.workspace-canvas {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.workspace-linkage,
+.workspace-metrics {
+  margin-bottom: 16px;
+}
+
+.workspace-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.workspace-content,
+.workspace-primary {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.workspace-content-customer {
+  grid-template-columns: minmax(0, 2fr) minmax(220px, 1fr);
+  align-items: start;
+}
+
+.workspace-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@container (max-width: 820px) {
+  .workspace-content-customer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 580px) {
+  .workspace-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (max-width: 360px) {
+  .workspace-metrics,
+  .workspace-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 880px) {
+  .workspace-split {
+    flex-direction: column;
+  }
+  .workspace-split-canvas {
+    flex: 1 1 55%;
+  }
+  .workspace-split-sidebar {
+    width: 100%;
+    flex: 0 0 42%;
+    border-top: 1px solid var(--border);
+  }
+  .workspace-split-separator {
+    display: none;
+  }
+  .workspace-ai-prompts,
+  .workspace-ai-note {
+    display: none;
+  }
+}

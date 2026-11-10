@@ -1,9 +1,20 @@
-node_modules/
-.turbo/
-.cache/
-dist/
-coverage/
-*.tsbuildinfo
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+dist-server
+.shuriva
+*.local
+
+# Credentials, local configuration, databases and backups
 .env
 .env.*
 !.env.example
@@ -13,14 +24,6 @@ coverage/
 .pypirc
 .ssh/
 .aws/
-*.log
-packages/storage-prisma/src/generated/
-.runtime/
-
-# Independent local private repositories; never include Cloud implementation in Public.
-/.private/
-
-# Local credentials and private key material. Public test fixtures need an explicit exception.
 *.pem
 *.key
 *.p12
@@ -30,12 +33,6 @@ packages/storage-prisma/src/generated/
 *.kdbx
 credentials.json
 service-account*.json
-# Public synthetic TLS fixtures; never deployment credentials (see adjacent README).
-!apps/community-api/test/fixtures/tls/ip.pem
-!apps/community-api/test/fixtures/tls/localhost.pem
-!apps/community-api/test/fixtures/tls/synthetic-key.pem
-
-# Local database copies, backups and process state; keep SQL migrations tracked.
 *.db
 *.db-*
 *.sqlite
@@ -50,20 +47,37 @@ service-account*.json
 *.sql.zst
 *.pid
 *.sock
+/.backup/
 /backups/
 /dumps/
 
-# Native build outputs and local editor/OS leftovers.
+# Generated artifacts, local tooling state and screenshots
+coverage/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
 *.exe
 *.dll
 *.so
 *.dylib
 *.o
 *.a
-*.test
 *.tmp
 *.bak
-*.swp
+/.analysis-shell.txt
+/demo-settings.yml
+/.playwright/
+/.playwright-cli/
+/.impeccable/
+/.claude/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
-Thumbs.db
-Desktop.ini
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

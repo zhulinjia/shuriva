@@ -1,2 +1,0 @@
-# Migration hashes depend on exact bytes; keep committed SQL byte-identical on all platforms.
-apps/community-api/migrations/*.sql -text

@@ -1,0 +1,262 @@
+38: A.source = id => A.state.sources.find(s=>s.id===id);
+39: A.workspace = () => A.state.workspaces.find(w=>w.id===A.ui.workspaceId)||A.state.workspaces[0];
+40: A.sourceAccess = id => {const s=A.source(id),p=A.currentPolicy();if(!s)return
+40: {ok:false,kind:'missing',title:'尚未绑定数据源',description:'在编辑器中为这个模块选择一个兼容的数据源。'};if(p&&!p.allowedSources.includes(id))return
+40: {ok:false,kind:'denied',title:'没有数据源访问权限',description:'当前演示角色未获准使用此来源，其他已授权模块不受影响。'};if(s.state==='offline')return
+40: {ok:false,kind:'offline',title:'数据源暂时不可用',description:'模拟连接已断开。恢复此数据源后即可重新读取。'};return {ok:true,source:s};};
+41: A.rowAllowed = (row,p) => !p||p.rowScope==='all'||(p.rowScope==='store'&&row.store==='杭州门店')||(p.rowScope==='assigned'&&row.assignee==='support-01');
+42: A.redact = row => {const p=A.currentPolicy();const result={...row};if(p)for(const [field,mode] of Object.entries(p.fields)){if(mode==='hidden')delete result[field];else
+42: if(mode==='masked'&&result[field]!=null)result[field]=A.mask(result[field],field);}return result;};
+43: A.queryOrders = (ws,filters={}) => { const access=A.sourceAccess(ws.bindings.orders);if(!access.ok)return {...access,rows:[]};if(!access.source.tables.includes('orders'))return
+43: {ok:false,kind:'denied',title:'订单表未获授权',description:'此连接的可用表不包含 orders。请由管理员调整授权范围。',rows:[]};const policy=A.currentPolicy();let
+43: rows=A.makeOrders(ws.bindings.orders).filter(r=>A.rowAllowed(r,policy));if(ws.kind==='orders')rows=rows.filter(r=>r.status!=='已完成');if(filters.customer&&filters.customer!=='all')rows=rows.filter(r=>r.customerId===filters.customer);if(filters.days&&filters.days!=='all')rows=rows.filter(r=>Date.parse(r.createdAt)>=Date.parse(A.now)-Number(filters.days)*86400000);if(filters.channel&&filters.channel!=='all')rows=rows.filter(r=>r.channel===filters.channel);rows=rows.map(A.redact);if(filters.search){const
+43: q=filters.search.toLowerCase();rows=rows.filter(r=>[r.id,r.customer,r.email||''].some(v=>v.toLowerCase().includes(q)));}if(filters.sort==='amount')rows.sort((a,b)=>b.amount-a.amount);return
+43: {...access,rows};};
+44: A.queryMembers = ws => {const access=A.sourceAccess(ws.bindings.profile);if(!access.ok)return {...access,rows:[]};if(!access.source.tables.includes('customers'))return
+44: {ok:false,kind:'denied',title:'客户表未获授权',description:'此连接的可用表不包含 customers。',rows:[]};const p=A.currentPolicy();return
+44: {...access,rows:A.makeMembers(ws.bindings.profile).filter(r=>A.rowAllowed(r,p)).map(A.redact)};};
+45: A.queryActivity = (ws,customer) => {const access=A.sourceAccess(ws.bindings.activity);if(!access.ok)return
+45: {...access,values:[]};if(!access.source.tables.includes('user_events'))return {ok:false,kind:'denied',title:'行为表未获授权',description:'此连接的可用表不包含 user_events。',values:[]};const
+45: p=A.currentPolicy();if(customer&&customer!=='all'){const person=A.makeMembers('members').find(m=>m.id===customer);if(!person||!A.rowAllowed(person,p))return
+45: {ok:false,kind:'denied',title:'无权查看该客户',description:'客户记录范围同样适用于使用数据。',values:[]};}return
+45: {...access,values:[18,32,26,40,30,57,44,66,52,70,60,83].map(v=>customer&&customer!=='all'?Math.round(v*.63):v),activeCount:customer&&customer!=='all'?1:A.makeMembers('members').filter(r=>A.rowAllowed(r,p)).length};};
+46: A.ensureUI = () =>
+46: {A.ui={role:'owner',page:1,search:'',channel:'all',days:'30',customer:'all',sort:'date',workspaceId:'customer-360',modal:null,sourceSearch:'',engineFilter:'all',sourceTab:'overview',memberSearch:'',scopeTab:'fields',permissionRole:'support',...A.ui};};A.ensureUI();
+47: A.bindingDomain={orders:'orders',profile:'members',activity:'events'};
+48: A.bindingLabel={orders:'订单明细',profile:'客户资料',activity:'使用趋势'};
+49: A.normalizeWorkspace = ws => {const copy=structuredClone(ws);copy.datasourceIds=[...new Set(Object.values(copy.bindings).filter(Boolean))];return copy;};
+50: A.validBinding = (key,id) => !id||A.source(id)?.domain===A.bindingDomain[key];
+51: A.canExport = () => !A.currentPolicy()||A.currentPolicy().export;
+52: A.escape = val => String(val??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+53: A.e=A.escape;
+54: A.money = n => new Intl.NumberFormat('zh-CN',{style:'currency',currency:'CNY',maximumFractionDigits:2}).format(n);
+55: A.date = d => new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Shanghai'}).format(new Date(d));
+57: A.icons = {
+58:  home:'<path d="m3 10 9-7 9 7v10H3z"/><path d="M9 20v-7h6v7"/>',grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3"
+58: y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+59:  database:'<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/>',plus:'<path d="M12 5v14M5 12h14"/>',arrow:'<path d="M4 12h16m-6-6 6 6-6
+59: 6"/>',chevron:'<path d="m9 5 7 7-7 7"/>',down:'<path d="m6 9 6 6 6-6"/>',search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',close:'<path d="m6 6 12 12M6 18 18
+59: 6"/>',check:'<path d="m5 12 4 4L19 6"/>',lock:'<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/>',shield:'<path d="m12 3 8 3v6c0 5-8 9-8
+59: 9s-8-4-8-9V6z"/><path d="m8 12 3 3 5-6"/>',users:'<circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 5v2"/>',table:'<rect x="3"
+59: y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 14h18M8 4v16"/>',chart:'<path d="M4 3v18h17M8 16v-5M13 16V6M18 16v-8"/>',settings:'<path d="M3 6h18M3 12h18M3
+59: 18h18"/><circle cx="8" cy="6" r="2" fill="currentColor"/><circle cx="16" cy="12" r="2" fill="currentColor"/><circle cx="10" cy="18" r="2" fill="currentColor"/>',refresh:'<path
+59: d="M20 10a8 8 0 0 0-14-5L3 8m0-5v5h5M4 14a8 8 0 0 0 14 5l3-3m-5 0h5v5"/>',spark:'<path d="m12 3 2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2z"/>',info:'<circle cx="12"
+59: cy="12" r="9"/><path d="M12 11v6M12 7v1"/>',warning:'<path d="m12 3 10 18H2zM12 9v5M12 17v1"/>',link:'<path d="m9 15 6-6m-4-3 2-2a5 5 0 0 1 7 7l-2 2M13 18l-2 2a5 5 0 0
+59: 1-7-7l2-2"/>',download:'<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',more:'<circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1"
+59: fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/>',code:'<path d="m8 5-6 7 6 7M16 5l6 7-6 7M14 3l-4 18"/>',clock:'<circle cx="12" cy="12" r="9"/><path d="M12
+59: 7v5l3 2"/>',eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7"/><circle cx="12" cy="12" r="3"/>',server:'<rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14"
+59: width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M11 6.5h6M11 17.5h6"/>',trash:'<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',edit:'<path d="m16 3 5
+59: 5-12 12-6 1 1-6zM13 6l5 5"/>',copy:'<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',folder:'<path d="M3 7V4h7l3 3h8v13H3z"/>',wallet:'<rect x="3" y="5"
+59: width="18" height="15" rx="2"/><path d="M3 8h18M17 12h4v5h-4a2.5 2.5 0 0 1 0-5"/>',collapse:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',logout:'<path
+59: d="M9 3H3v18h6M13 8l5 4-5 4M8 12h13"/>',cloud:'<path d="M7 19a5 5 0 0 1-1-10 7 7 0 0 1 13-1 5.5 5.5 0 0 1-1 11z"/>',mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path
+59: d="m3 6 9 7 9-7"/>',calendar:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4M17 3v4M3 10h18"/>'
+60: };
+61: A.icon=(name,size=17)=>`<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+61: stroke-linejoin="round" aria-hidden="true">${A.icons[name]||A.icons.grid}</svg>`;
+62: A.btn=(text,action,extra='',variant='secondary',icon='')=>`<button type="button" class="btn ${variant}" data-action="${action}" ${extra}>${icon?A.icon(icon):''}${text}</button>`;
+63: A.badge=(text,tone='neutral')=>`<span class="badge ${tone}">${text}</span>`;
+64: A.engineIcon = engine => `<span class="engine-icon ${engine==='PostgreSQL'?'pg':engine==='MySQL'?'my':'ck'}">${engine==='PostgreSQL'?'P':engine==='MySQL'?'M':'C'}</span>`;
+65: A.sourceChip=id=>{const s=A.source(id);return s?`<button class="source-chip" data-action="source-detail"
+65: data-id="${A.e(id)}">${A.engineIcon(s.engine)}<span>${A.e(s.name)}</span><span class="dot ${s.state==='offline'?'red':''}"></span></button>`:A.badge('未绑定','warning');};
+66: A.status=state=>A.badge(`<span class="dot ${state==='offline'?'red':''}"></span>${state==='connected'?'连接可用':'连接离线'}`,state==='connected'?'success':'danger');
+67: A.field=(label,input,hint='')=>`<label class="field"><span>${label}</span>${input}${hint?`<small>${hint}</small>`:''}</label>`;
+68: A.input=(id,value,placeholder='',attrs='')=>`<input id="${id}" data-model="${id}" value="${A.e(value)}" placeholder="${A.e(placeholder)}" ${attrs}>`;
+69: A.select=(id,value,options,attrs='')=>`<select id="${id}" data-model="${id}" ${attrs}>${options.map(([v,t])=>`<option value="${A.e(v)}"
+69: ${value===v?'selected':''}>${A.e(t)}</option>`).join('')}</select>`;
+70: A.notice=(text,kind='subtle',icon='info')=>`<div class="notice ${kind}">${A.icon(icon)}<div>${text}</div></div>`;
+71: A.empty=(title,desc,icon='database',action='')=>`<div class="empty-state">${A.icon(icon,28)}<h3>${title}</h3><p>${desc}</p>${action}</div>`;
+72: A.pageHead=(eyebrow,title,description,actions='')=>`<div class="page-heading"><div>${eyebrow?`<div
+72: class="eyebrow">${eyebrow}</div>`:''}<h1>${title}</h1><p>${description}</p></div><div class="heading-actions">${actions}</div></div>`;
+73: A.sourceFailure=(access,id)=>A.empty(access.title,access.description,access.kind==='denied'?'lock':'database',access.kind==='offline'?A.btn('恢复模拟连接','restore-source',`data-id="${A.e(id)}"`,'secondary','refresh'):'');
+74: A.sourceFooter=id=>{const s=A.source(id);return `<div class="module-footer"><span>${A.icon('database',13)}${s?A.e(s.name):'未绑定来源'}</span><span>${s?.state==='connected'?'模拟更新时间
+74: 14:32':'尚未获取数据'}</span></div>`;};
+75: A.modal = (title,body,footer='',wide=false,drawer=false) => `<dialog id="active-modal" class="dialog ${wide?'wide':''} ${drawer?'drawer':''}" aria-labelledby="dialog-title"><div
+75: class="dialog-inner"><header class="dialog-head"><div><h2 id="dialog-title">${title}</h2></div>${A.btn('','close-modal','aria-label="关闭弹窗"','icon-button','close')}</header><div
+75: class="dialog-body">${body}</div>${footer?`<footer class="dialog-footer">${footer}</footer>`:''}</div></dialog>`;
+76: A.shell = body => {const
+76: team=A.state.edition==='team',nav=[['home','home','首页'],['workspaces','grid','我的工作台'],['datasources','database','数据源'],...(team?[['permissions','shield','成员与数据权限']]:[])];const
+76: w=A.workspace();return `<div class="app-shell ${A.ui.route==='editor'?'editing':''} ${A.ui.navOpen?'nav-open':''}"><aside class="sidebar"><button class="brand" data-action="nav"
+76: data-page="home" aria-label="Stackoryn 首页"><span class="brand-logo"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="m12 3 9 5-9 5-9-5z" fill="white"/><path
+76: d="m3 11 9 5 9-5M3 15l9 5 9-5" stroke="white" stroke-width="2"/></svg></span><span>Stackoryn<span class="brand-period">.</span></span></button><button class="space-selector"
+76: data-action="nav" data-page="settings"><span class="square-avatar">${team?'T':'P'}</span><span><strong>${team?'团队工作空间':'个人工作空间'}</strong><small>${team?'Team · 设计预览':'Community ·
+76: 自部署'}</small></span>${A.icon('down',14)}</button>${A.btn('创建工作台','create-workspace','','primary create-button','plus')}<nav
+76: aria-label="主导航">${nav.map(([route,icon,label])=>`<button class="nav-item ${(A.ui.route===route||route==='workspaces'&&['workspace','editor'].includes(A.ui.route))?'active':''}"
+76: data-action="nav"
+76: data-page="${route}">${A.icon(icon,18)}<span>${label}</span>${route==='workspaces'?`<small>${A.state.workspaces.length}</small>`:''}</button>`).join('')}</nav><div
+76: class="nav-section">最近使用</div><div class="recent-nav">${A.state.workspaces.slice(0,4).map(ws=>`<button class="recent-item
+76: ${A.ui.workspaceId===ws.id&&A.ui.route==='workspace'?'current':''}" data-action="open-workspace"
+76: data-id="${A.e(ws.id)}">${A.icon(ws.kind==='members'?'users':'table',15)}<span>${A.e(ws.title)}</span></button>`).join('')}</div><div class="sidebar-bottom"><div
+76: class="deployment-note">${A.icon(team?'cloud':'server',16)}<div><strong>${team?'云版体验预览':'后端直接连接数据库'}</strong><small>${team?'连接方案待定':'无需额外部署 Connector'}</small></div></div><button
+76: class="nav-item ${A.ui.route==='settings'?'active':''}" data-action="nav" data-page="settings">${A.icon('settings',18)}<span>设置与演示</span></button><div class="profile"><span
+76: class="avatar">S</span><div><strong>Stackoryn Demo</strong><small>${team?'多成员权限预览':'单用户 · 多数据源'}</small></div>${A.badge('MOCK')}</div></div></aside><div class="nav-scrim"
+76: data-action="toggle-nav"></div><main class="app-main"><header class="global-bar"><div class="breadcrumbs">${A.btn('','toggle-nav','aria-label="打开导航"','mobile-nav
+76: icon-button','collapse')}${A.icon('grid',15)}<span>${{home:'首页',workspace:'我的工作台',editor:'工作台编辑器',datasources:'数据源',permissions:'团队版设计',settings:'设置',workspaces:'我的工作台'}[A.ui.route]||'工作空间'}</span>${['workspace','editor'].includes(A.ui.route)?`${A.icon('chevron',12)}<span
+76: class="breadcrumb-current">${A.e(A.ui.draft?.title&&A.ui.route==='editor'?A.ui.draft.title:w?.title||'新建工作台')}</span>`:''}</div><div class="global-actions">${A.badge('<span
+76: class="dot gray"></span>Mock 交互原型')}${A.btn('演示设置','nav','data-page="settings"','ghost compact','settings')}<span class="avatar
+76: small">S</span></div></header>${A.ui.storageBlocked?A.notice('当前浏览器不允许本地保存；关闭后修改可能丢失。','warning'):''}${team&&['workspace','editor'].includes(A.ui.route)?`<div
+76: class="role-preview-bar">${A.icon('shield',16)}<strong>管理员权限预览</strong>${A.select('previewRole',A.ui.role,[['owner','数据管理员'],['support','客服'],['finance','财务'],['operator','门店运营']])}<span>仅模拟不同成员的可见结果，不改变登录身份。</span>${A.btn('编辑数据策略','nav','data-page="permissions"','text-button')}</div>`:''}${body}<div
+76: class="app-bottom-note">交互设计预览 · 全部使用虚构数据 · 不连接真实数据库</div></main></div><div id="toast-root" class="toast-container"
+76: aria-live="polite"></div>${A.dialogContent?A.dialogContent():''}`;};
+78: A.renderWorkbench = (ws,preview=false) => {
+79:  if(!ws)return A.empty('工作台不存在','从工作台目录选择一个已有工作台。');
+80:  const q=A.queryOrders(ws,A.ui),profile=A.queryMembers(ws),activity=A.queryActivity(ws,A.ui.customer),p=A.currentPolicy();
+81:  const allowedCost=(!p||p.fields.cost!=='hidden')&&ws.config.showCost,allowedPhone=(!p||p.fields.phone!=='hidden')&&ws.config.showPhone;
+82:  const rows=q.rows||[],pageSize=6,maxPage=Math.max(1,Math.ceil(rows.length/pageSize));A.ui.page=Math.min(A.ui.page,maxPage);
+83:  const selected=profile.rows?.find(r=>r.id===A.ui.customer);
+84:  const ordersModule=()=>`<section class="surface orders-module"><div
+84: class="module-heading"><div><h3>${ws.kind==='orders'?'异常订单':'订单明细'}</h3>${q.ok?A.badge(rows.length):''}</div><div
+84: class="module-actions">${A.btn('来源','module-source','data-module="orders"','text-button','database')}${A.btn('导出 CSV','export-orders',`${!q.ok||!A.canExport()?'disabled
+84: title="当前角色不允许导出，或来源不可用"':''}`,'text-button','download')}</div></div>${q.ok?`<div class="table-toolbar"><div
+84: class="search-field">${A.icon('search',16)}${A.input('orderSearch',A.ui.search,'搜索订单、客户或可见邮箱')}</div><div class="filter-controls">${A.select('orderDays',A.ui.days,[['7','近 7
+84: 天'],['30','近 30
+84: 天'],['all','全部时间']])}${A.select('orderChannel',A.ui.channel,[['all','全部支付渠道'],['微信支付','微信支付'],['支付宝','支付宝'],['Stripe','Stripe']])}${A.select('orderSort',A.ui.sort,[['date','时间倒序'],['amount','金额从高到低']])}</div></div><div
+84: class="table-scroll"><table class="business-table"><thead><tr><th>订单编号</th><th>客户</th><th class="number">实付金额</th>${allowedCost?'<th
+84: class="number">成本</th>':''}<th>支付渠道</th><th>状态</th><th>创建时间</th><th></th></tr></thead><tbody>${rows.slice((A.ui.page-1)*pageSize,A.ui.page*pageSize).map(r=>`<tr
+84: data-action="order-detail" data-id="${r.id}" tabindex="0" role="button" aria-label="查看订单 ${r.id}"><td><span class="mono small-text">${r.id}</span><small
+84: class="table-secondary">${r.product}</small></td><td><span class="customer-cell"><span class="avatar tiny">${r.customer[0]}</span><span>${r.customer}<small
+84: class="table-secondary">${A.e(r.email||r.store)}</small></span></span></td><td class="number strong">${A.money(r.amount)}</td>${allowedCost?`<td
+84: class="number">${p?.fields.cost==='masked'?'••••':A.money(r.cost)}</td>`:''}<td><span class="payment-icon
+84: ${r.channel==='Stripe'?'stripe':r.channel==='支付宝'?'ali':'wechat'}">${r.channel==='Stripe'?'S':r.channel[0]}</span>${r.channel}</td><td>${A.badge(`<span
+84: class="status-mini-dot"></span>${r.status}`,r.status==='已完成'?'success':r.status==='履约失败'?'danger':r.status==='状态不一致'?'purple':'warning')}</td><td class="muted
+84: small-text">${A.date(r.createdAt)}</td><td>${A.icon('chevron',14)}</td></tr>`).join('')||`<tr><td
+84: colspan="8">${A.empty('没有符合条件的订单','调整筛选或搜索条件；当前角色的记录范围仍会生效。','search',A.btn('重置筛选','reset-filters','','secondary'))}</td></tr>`}</tbody></table></div><div
+84: class="table-pagination"><span>显示 ${rows.length?(A.ui.page-1)*pageSize+1:0}–${Math.min(rows.length,A.ui.page*pageSize)} 条，共 ${rows.length}
+84: 条</span><div>${A.btn('上一页','page-prev',A.ui.page===1?'disabled':'','ghost compact')}<span class="page-current">${A.ui.page}</span><span class="muted">/
+84: ${maxPage}</span>${A.btn('下一页','page-next',A.ui.page===maxPage?'disabled':'','ghost
+84: compact')}</div></div>${A.sourceFooter(ws.bindings.orders)}`:A.sourceFailure(q,ws.bindings.orders)}</section>`;
+85:  const profileModule=()=>`<section class="surface profile-module"><div
+85: class="module-heading"><div><h3>客户资料</h3>${A.badge(A.source(ws.bindings.profile)?.engine||'未绑定')}</div>${A.btn('','module-source','data-module="profile"
+85: aria-label="客户资料数据来源"','icon-button','database')}</div>${profile.ok?selected?`<div class="customer-profile"><span class="avatar
+85: large">${selected.name[0]}</span><h3>${selected.name}</h3><p class="mono">${selected.id}</p>${A.badge(selected.plan,'success')}</div><dl class="detail-fields
+85: compact"><div><dt>所属门店</dt><dd>${selected.store}</dd></div>${selected.email!==undefined?`<div><dt>邮箱
+85: ${p?.fields.email==='masked'?A.badge('脱敏','warning'):''}</dt><dd>${A.e(selected.email)}</dd></div>`:''}${allowedPhone&&selected.phone!==undefined?`<div><dt>手机号
+85: ${p?.fields.phone==='masked'?A.badge('脱敏','warning'):''}</dt><dd>${selected.phone}</dd></div>`:''}<div><dt>注册日期</dt><dd>${selected.registered}</dd></div><div><dt>订阅状态</dt><dd><span
+85: class="dot"></span>服务中</dd></div></dl>${A.btn('查看全部客户','clear-customer','','ghost full-width','arrow')}`:`<div class="customer-list-caption">点击客户，联动订单与使用数据</div><div
+85: class="customer-list">${profile.rows.map(r=>`<button data-action="select-customer" data-id="${r.id}" class="customer-list-item"><span
+85: class="avatar">${r.name[0]}</span><span><strong>${r.name}</strong><small>${r.plan} ·
+85: ${r.store}</small></span>${A.icon('chevron',14)}</button>`).join('')||A.empty('当前没有可见客户','记录范围由演示策略决定。','users')}</div>`:A.sourceFailure(profile,ws.bindings.profile)}${profile.ok?A.sourceFooter(ws.bindings.profile):''}</section>`;
+86:  const activityModule=()=>`<section class="surface activity-module"><div class="module-heading"><div><h3>产品使用趋势</h3><span class="muted small-text">近 12 天 ·
+86: 按客户标识联动</span></div>${A.btn('来源','module-source','data-module="activity"','text-button','database')}</div>${activity.ok?`<div class="activity-layout"><div
+86: class="activity-summary"><div class="metric-label">授权范围内活跃客户</div><strong>${activity.activeCount}<small> 位</small></strong><p>示例活动数据，不随订单时间筛选变化</p></div><div class="chart-area"
+86: role="img" aria-label="近12天模拟产品使用趋势"><div class="chart-bars">${activity.values.map((v,i)=>`<div class="chart-bar-wrap"><span class="chart-bar" style="height:${v}%" title="第 ${i+1}
+86: 天：${v} 次"></span><small>${i%3===0?String(i+1).padStart(2,'0'):''}</small></div>`).join('')}</div><span class="chart-axis-label">10/28 — 11/08 ·
+86: 每日访问次数</span></div></div>${A.sourceFooter(ws.bindings.activity)}`:A.sourceFailure(activity,ws.bindings.activity)}</section>`;
+87:  if(ws.kind==='members')return `<div class="workbench-content">${profileModule()}</div>`;
+88:  return `<div class="workbench-content">${ws.kind==='customer'?`<div
+88: class="linked-filter"><div>${A.icon('link',17)}<strong>客户联动</strong>${A.select('workspaceCustomer',A.ui.customer,[['all','全部授权客户'],...(profile.rows||[]).map(r=>[r.id,r.name+' ·
+88: '+r.id])],!profile.ok?'disabled':'')}</div><span>使用已确认的 <code>customer_id</code> 映射 · 非跨库 JOIN</span>${A.btn('查看绑定','bindings','','text-button','settings')}</div>`:''}${q.ok?`<div
+88: class="metrics-strip"><div><span>匹配订单 ${A.icon('table',16)}</span><strong>${rows.length}<small> 笔</small></strong><p>当前筛选与记录权限范围</p></div><div><span>实付金额
+88: ${A.icon('wallet',16)}</span><strong>${A.money(rows.reduce((s,r)=>s+r.amount,0))}</strong><p>按订单去重，不仅统计当前页</p></div><div><span>待核查订单
+88: ${A.icon('clock',16)}</span><strong>${rows.filter(r=>r.status!=='已完成').length}<small>
+88: 笔</small></strong><p>履约超时、失败或状态不一致</p></div></div>`:A.notice('订单来源当前不可用，订单指标暂不显示；独立来源模块仍可正常使用。','warning','warning')}<div class="workspace-columns
+88: ${ws.kind==='orders'?'single':''}"><div
+88: class="workspace-primary">${ordersModule()}${ws.kind==='customer'&&ws.config.showActivity?activityModule():''}</div>${ws.kind==='customer'?`<aside
+88: class="workspace-secondary">${profileModule()}<div
+88: class="scope-hint">${A.icon('shield',17)}<div><strong>${p?'当前演示角色：'+p.label:'只读工作台'}</strong><p>${p?p.description+'。隐藏字段不会出现在此角色的详情和导出中。':'各模块独立读取已绑定来源。工作台不会自动切换到其他数据库。'}</p></div></div></aside>`:''}</div></div>`;
+89: };
+90: A.pages.workspace = () => {const ws=A.workspace();if(!ws)return `<div
+90: class="page">${A.empty('还没有工作台','创建一个工作台开始。','grid',A.btn('创建工作台','create-workspace','','primary','plus'))}</div>`;return `<div class="page
+90: workspace-page">${A.pageHead('',`${A.e(ws.title)} ${A.badge('已保存','subdued')}`,A.e(ws.description),A.btn('刷新','refresh-workspace','','secondary','refresh')+A.btn('用 AI
+90: 修改','edit-workspace','','primary','spark'))}<div class="workspace-meta"><div class="source-pills">${ws.datasourceIds.map(A.sourceChip).join('')}</div><span
+90: class="meta-divider"></span><span>${A.icon('lock',13)}只读</span><span>v${ws.version}</span>${A.btn('数据说明','data-notes','','text-button','info')}</div>${A.renderWorkbench(ws)}</div>`;};
+92: A.pages.workspaces = () => {const q=A.ui.workspaceSearch||'',filter=A.ui.workspaceSource||'all';const
+92: rows=A.state.workspaces.filter(w=>w.title.includes(q)&&(filter==='all'||w.datasourceIds.includes(filter)));return `<div
+92: class="page">${A.pageHead('WORKSPACES','我的工作台','把重复的业务查询，变成随时可以打开的工具。',A.btn('创建工作台','create-workspace','','primary','plus'))}<div class="directory-toolbar"><div
+92: class="search-field">${A.icon('search',16)}${A.input('workspaceSearch',q,'搜索工作台')}</div>${A.select('workspaceSource',filter,[['all','全部数据源'],...A.state.sources.map(s=>[s.id,s.name])])}<span
+92: class="muted">${rows.length} 个工作台</span></div><div class="surface workspace-directory"><div
+92: class="directory-head"><span>工作台</span><span>使用的数据源</span><span>修改时间</span><span></span></div>${rows.map(w=>`<div class="workspace-directory-row"><button class="directory-name"
+92: data-action="open-workspace" data-id="${w.id}"><span
+92: class="workspace-icon">${A.icon(w.kind==='members'?'users':w.kind==='customer'?'grid':'table',21)}</span><span><strong>${A.e(w.title)}</strong><small>${A.e(w.description)}</small></span></button><div
+92: class="source-pills">${w.datasourceIds.map(id=>{const s=A.source(id);return s?`<span class="source-short"
+92: title="${A.e(s.name)}">${A.engineIcon(s.engine)}${A.e(s.name)}</span>`:''}).join('')}</div><span class="muted small-text">${A.date(w.updated)}</span><div
+92: class="row-actions">${A.btn('','rename-workspace',`data-id="${w.id}" aria-label="重命名 ${A.e(w.title)}"`,'icon-button','edit')}${A.btn('','copy-workspace',`data-id="${w.id}"
+92: aria-label="复制 ${A.e(w.title)}"`,'icon-button','copy')}${A.btn('','delete-workspace',`data-id="${w.id}" aria-label="删除
+92: ${A.e(w.title)}"`,'icon-button','trash')}</div></div>`).join('')||A.empty('没有找到工作台','换个名称或数据源试试。','search')}</div><div
+92: class="inline-footnote">${A.icon('info',15)}删除工作台不会删除数据库记录；复制工作台不会复制更高的数据权限。</div></div>`;};
+94: A.pages.home=()=>{const selected=A.ui.createSources||['orders','members','events'];return `<div class="page home-page"><div class="home-heading"><div><div class="eyebrow">YOUR
+94: BUSINESS, CONNECTED</div><h1>今天，从哪个工作台开始？</h1><p>连接已有数据，把零散的业务查询变成可以反复使用的工具。</p></div><span class="home-edition">${A.icon('server',18)}${A.state.edition==='community'?'Community ·
+94: 用户后端直连':'Team · 体验预览'}</span></div><section class="home-create"><div class="home-create-top"><span
+94: class="small-spark">${A.icon('spark',20)}</span><h2>描述需求，创建一个业务工作台</h2></div><textarea id="homePrompt" data-model="homePrompt" rows="2"
+94: placeholder="例如：把会员资料、订单和使用情况放在一起，做一个客户业务总览……">${A.e(A.ui.homePrompt||'')}</textarea><div class="composer-bottom"><button class="select-sources-button"
+94: data-action="select-create-sources">${A.icon('database',16)}<span>使用 ${selected.length} 个数据源</span><span class="mini-engines">${[...new
+94: Set(selected.map(id=>A.source(id)?.engine).filter(Boolean))].map(A.engineIcon).join('')}</span>${A.icon('down',14)}</button>${A.btn('创建工作台','generate-home','','primary','arrow')}</div></section><div
+94: class="suggestion-row"><span>从一个具体任务开始</span>${A.btn('客户业务总览','template','data-template="customer"','suggestion','users')}${A.btn('异常订单排查','template','data-template="orders"','suggestion','table')}${A.btn('高价值客户检索','template','data-template="members"','suggestion','search')}</div><section
+94: class="home-section"><div class="section-heading"><div><h2>继续你的工作</h2><span>已保存的工作台，无需重新询问
+94: AI</span></div>${A.btn('查看全部','nav','data-page="workspaces"','text-button','arrow')}</div><div class="workspace-cards">${A.state.workspaces.slice(0,3).map(w=>`<button
+94: class="workspace-card" data-action="open-workspace" data-id="${w.id}"><div class="card-top"><span
+94: class="workspace-icon">${A.icon(w.kind==='customer'?'grid':w.kind==='orders'?'table':'users',23)}</span>${A.icon('arrow',18)}</div><h3>${A.e(w.title)}</h3><p>${A.e(w.description)}</p><div
+94: class="card-bottom"><span class="mini-engines">${[...new
+94: Set(w.datasourceIds.map(id=>A.source(id)?.engine).filter(Boolean))].map(A.engineIcon).join('')}</span><span>${w.datasourceIds.length}
+94: 个数据源</span><span>v${w.version}</span></div></button>`).join('')||A.empty('还没有保存的工作台','上方描述需求，或先体验示例。','grid')}</div></section><section class="home-section"><div
+94: class="section-heading"><div><h2>数据已就位</h2><span>数据库类型不同，也能出现在同一个业务界面</span></div>${A.btn('管理数据源','nav','data-page="datasources"','text-button','arrow')}</div><div class="surface
+94: home-sources">${A.state.sources.slice(0,4).map(s=>`<button class="home-source" data-action="source-detail"
+94: data-id="${s.id}">${A.engineIcon(s.engine)}<span><strong>${A.e(s.name)}</strong><small>${s.engine} · ${s.environment}</small></span><span class="dot
+94: ${s.state==='offline'?'red':''}"></span></button>`).join('')}</div></section></div>`;};
+96: A.pages.datasources=()=>{const q=A.ui.sourceSearch,filter=A.ui.engineFilter,sources=A.state.sources.filter(s=>(s.name+'
+96: '+s.database).toLowerCase().includes(q.toLowerCase())&&(filter==='all'||s.engine===filter));const team=A.state.edition==='team';return `<div class="page
+96: sources-page">${A.pageHead('DATA SOURCES','数据源','管理数据库连接。在同一个工作台中，按需组合不同来源的数据。',A.btn('添加数据源','add-source','','primary','plus'))}<div
+96: class="connection-model">${A.icon(team?'cloud':'server',21)}<div><strong>${team?'团队版连接方式待定':'开源版 · 应用后端直连'}</strong><span>${team?'此界面仅演示数据源管理；不预设云端托管凭证或独立连接节点。':'由你部署的 Stackoryn
+96: 后端连接数据库，无需额外安装 Connector。当前为模拟连接。'}</span></div>${A.btn('了解部署边界','nav','data-page="settings"','text-button','arrow')}</div><div
+96: class="source-stat-row"><div><strong>${A.state.sources.length}</strong><span>个数据源</span></div><div><span
+96: class="dot"></span><strong>${A.state.sources.filter(s=>s.state==='connected').length}</strong><span>连接可用</span></div><div><span class="dot
+96: red"></span><strong>${A.state.sources.filter(s=>s.state==='offline').length}</strong><span>暂时离线</span></div><div><strong>${new
+96: Set(A.state.sources.map(s=>s.engine)).size}</strong><span>种数据库类型</span></div></div><div class="directory-toolbar"><div
+96: class="search-field">${A.icon('search',16)}${A.input('sourceSearch',q,'搜索连接名称或数据库名')}</div><div
+96: class="segmented">${[['all','全部'],['PostgreSQL','PostgreSQL'],['MySQL','MySQL'],['ClickHouse','ClickHouse']].map(([v,t])=>`<button data-action="filter-engine" data-value="${v}"
+96: class="${filter===v?'selected':''}">${t}</button>`).join('')}</div></div><div class="surface sources-list"><div
+96: class="source-table-head"><span>数据源</span><span>环境与访问</span><span>连接状态</span><span>使用情况</span><span></span></div>${sources.map(s=>{const
+96: refs=A.state.workspaces.filter(w=>w.datasourceIds.includes(s.id));return `<div class="source-row"><button class="source-identity" data-action="source-detail"
+96: data-id="${s.id}">${A.engineIcon(s.engine)}<span><strong>${A.e(s.name)}</strong><small>${s.engine} <span>·</span>
+96: <code>${A.e(s.database)}</code></small></span></button><div>${A.badge(s.environment,s.environment==='生产'?'blue':'neutral')}<small
+96: class="table-secondary">${A.icon('lock',12)}只读访问</small></div><div>${A.status(s.state)}<small class="table-secondary">模拟状态 · ${s.updated}</small></div><button class="usage-link"
+96: data-action="source-detail" data-id="${s.id}" data-tab="usage">${refs.length} 个工作台${A.icon('chevron',13)}</button><div
+96: class="row-actions">${A.btn('管理','source-detail',`data-id="${s.id}"`,'secondary compact')}${A.btn('','edit-source',`data-id="${s.id}" aria-label="编辑
+96: ${A.e(s.name)}"`,'icon-button','edit')}</div></div>`}).join('')||A.empty('没有匹配的数据源','支持同一种数据库创建多条连接。','database',A.btn('添加数据源','add-source','','primary','plus'))}</div><div
+96: class="source-guide-grid"><div><span class="guide-number">01</span><h3>连接彼此独立</h3><p>生产、测试库分别管理，不会因为页面切换而替换工作台的执行目标。</p></div><div><span
+96: class="guide-number">02</span><h3>每个模块明确来源</h3><p>客户资料来自会员库，订单来自交易库。按查询绑定，而非全局切换。</p></div><div><span
+96: class="guide-number">03</span><h3>密码不在浏览器保存</h3><p>原型不接收真实凭证；正式开源版交由用户部署的后端保存和使用。</p></div></div></div>`;};
+98: A.startEditor=(id,prompt='',kind='customer',sources)=>{
+99:  const original=id?A.state.workspaces.find(w=>w.id===id):null;
+100:  const ds=sources||A.state.sources.filter(s=>s.state==='connected').map(s=>s.id);
+101:  const choose=domain=>ds.find(sid=>A.source(sid)?.domain===domain)||'';
+102:  const
+102: base=original?structuredClone(original):{id:A.uid('workspace'),title:kind==='customer'?'客户业务总览':kind==='members'?'高价值客户检索':'异常订单排查',description:kind==='customer'?'把客户资料、订单和使用情况放在同一个工作台。':kind==='orders'?'定位已支付但未履约的订单，核查业务异常。':'查看会员资料与订阅状态。',kind,datasourceIds:ds,bindings:kind==='customer'?{orders:choose('orders'),profile:choose('members'),activity:choose('events')}:kind==='orders'?{orders:choose('orders')}:{profile:choose('members')},version:original?.version||0,config:{showActivity:kind==='customer'&&!!choose('events'),showPhone:true,showCost:false,defaultDays:'30'},updated:A.now};
+103:  A.ui.editorOriginal=original?structuredClone(original):null;
+104:  A.ui.draft=original&&A.state.drafts[id]?structuredClone(A.state.drafts[id]):base;
+105:  A.ui.editorTab='chat';A.ui.mobileEditor='preview';A.ui.editorDirty=!original||JSON.stringify(base)!==JSON.stringify(A.ui.draft);
+106: A.ui.messages=[...(prompt?[{role:'user',text:prompt}]:[]),{role:'assistant',text:original?'可以继续描述你希望怎样调整这个工作台。修改会先进入草稿，保存后才影响正式界面。':'已使用预设模板生成草稿。每个模块单独绑定数据源，你可以在「数据与模块」中检查来源。',changes:['订单查询、客户查询与行为查询分别执行','客户联动使用已确认的
+106: customer_id 映射','所有查询和 AI 响应均为本地模拟']}];
+107:  A.ui.workspaceId=base.id;A.ui.editorPrompt='';A.ui.customer='all';A.ui.search='';A.ui.page=1;
+108:  A.navigate('editor',base.id,true);
+109: };
+110: A.pages.editor=()=>{const ws=A.ui.draft;if(!ws)return `<div
+110: class="page">${A.empty('尚未创建草稿','从首页描述需求，或选择已有工作台进行修改。','grid',A.btn('创建工作台','create-workspace','','primary'))}</div>`;const dirty=A.ui.editorDirty;return `<div
+110: class="editor-page"><div class="editor-toolbar"><div><button class="back-button" data-action="leave-editor" aria-label="退出编辑">${A.icon('arrow',18)}</button><span
+110: class="editor-title">${A.e(ws.title)}</span>${A.badge(dirty?'未保存草稿':'草稿已保存',dirty?'warning':'success')}<span class="editor-revision">基于
+110: v${A.ui.editorOriginal?.version||0}</span></div><div>${A.btn('放弃修改','discard-editor','','secondary')}${A.btn(A.ui.editorOriginal?'保存更新':'保存工作台','save-workspace',A.ui.generating?'disabled':'','primary','check')}</div></div><div
+110: class="mobile-editor-tabs segmented"><button data-action="mobile-editor" data-tab="chat" class="${A.ui.mobileEditor==='chat'?'selected':''}">对话与配置</button><button
+110: data-action="mobile-editor" data-tab="preview" class="${A.ui.mobileEditor==='preview'?'selected':''}">工作台预览</button></div><div class="editor-columns
+110: mobile-${A.ui.mobileEditor}"><aside class="editor-panel"><div class="editor-tabs"><button class="${A.ui.editorTab==='chat'?'selected':''}" data-action="editor-tab"
+110: data-tab="chat">${A.icon('spark',16)}AI 修改</button><button class="${A.ui.editorTab==='data'?'selected':''}" data-action="editor-tab"
+110: data-tab="data">${A.icon('database',16)}数据与模块</button></div>${A.ui.editorTab==='chat'?`<div class="chat-messages">${A.ui.messages.map(m=>`<div class="message
+110: ${m.role}">${m.role==='assistant'?`<div class="message-author"><span class="assistant-avatar">${A.icon('spark',14)}</span>Stackoryn <span>模拟响应</span></div>`:''}<div
+110: class="message-text">${A.e(m.text)}</div>${m.changes?`<div
+110: class="change-list">${m.changes.map(t=>`<div>${A.icon('check',13)}<span>${A.e(t)}</span></div>`).join('')}</div>`:''}</div>`).join('')}${A.ui.generating?`<div
+110: class="generation-progress"><span class="spinner"></span><span>正在更新预览草稿…</span>${A.btn('停止','stop-generation','','text-button')}</div>`:''}<div
+110: class="chat-tip">${A.icon('lock',14)}AI 不会改变数据权限，也不会执行数据库写入。</div></div><div class="editor-composer"><div
+110: class="prompt-quick">${A.btn('增加使用趋势','editor-suggest','data-prompt="增加使用趋势"','suggestion')}${A.btn('隐藏手机号','editor-suggest','data-prompt="隐藏手机号"','suggestion')}</div><div
+110: class="editor-prompt-box"><textarea id="editorPrompt" data-model="editorPrompt" rows="3"
+110: placeholder="描述如何修改，比如：隐藏手机号……">${A.e(A.ui.editorPrompt||'')}</textarea><div><span>仅修改当前草稿</span>${A.btn('','send-editor',`${A.ui.generating?'disabled':''}
+110: aria-label="发送修改指令"`,'primary icon-button','arrow')}</div></div></div>`:`<div class="editor-data-panel"><div
+110: class="section-mini-head"><h3>工作台数据源</h3>${A.btn('选择','choose-editor-sources','','text-button','plus')}</div><div
+110: class="editor-source-list">${ws.datasourceIds.map(id=>A.sourceChip(id)).join('')||'<p class="muted">还没有选择数据源</p>'}</div><p class="small-note">选择来源只确定可用范围。每个模块仍需绑定具体来源与查询。</p><div
+110: class="section-mini-head"><h3>模块与查询绑定</h3></div>${Object.keys(ws.bindings).map(key=>`<div
+110: class="binding-card"><div>${A.icon(key==='orders'?'table':key==='profile'?'users':'chart',16)}<strong>${A.bindingLabel[key]}</strong><code>q_${key}</code></div>${A.select('binding-'+key,ws.bindings[key]||'',[['','请选择兼容数据源'],...A.state.sources.filter(s=>ws.datasourceIds.includes(s.id)&&s.domain===A.bindingDomain[key]).map(s=>[s.id,s.name+'
+110: · '+s.engine])])}<small>${key==='orders'?'orders · 按 customer_id 筛选':key==='profile'?'customers · id → customer_id':'user_events · user_id →
+110: customer_id'}</small></div>`).join('')}<div class="relation-card">${A.icon('link',17)}<div><strong>客户标识映射</strong><p>customers.id → orders.customer_id<br>customers.id →
+110: user_events.user_id</p><small>示例中已确认 · 不是自动猜测关联</small></div></div><div
+110: class="section-mini-head"><h3>显示配置</h3></div>${[['showPhone','显示手机号'],['showCost','显示订单成本'],['showActivity','显示使用趋势']].map(([key,label])=>`<label
+110: class="switch-row"><span>${label}</span><input type="checkbox" id="config-${key}" data-model="config-${key}" ${ws.config[key]?'checked':''}></label>`).join('')}<p
+110: class="small-note">显示列属于布局配置，不能覆盖成员的数据权限。</p></div>`}</aside><div class="editor-preview"><div class="preview-bar"><div><span
+110: class="dot"></span><strong>实时预览</strong>${A.badge('草稿')}</div><span>${ws.datasourceIds.length} 个来源 · 模拟数据 · 只读</span>${A.btn('数据说明','data-notes','','icon-button','info')}</div><div
+110: class="preview-content">${A.renderWorkbench(ws,true)}</div></div></div></div>`;};

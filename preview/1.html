@@ -1,0 +1,2503 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shuriva - AI Business Workspace</title>
+
+<style>
+:root {
+  --brand: #6259D9;
+  --brand-hover: #554CC9;
+  --brand-light: #F0EDFF;
+  --bg: #F7F8FC;
+  --white: #FFFFFF;
+  --text: #24243A;
+  --muted: #747A90;
+  --border: #E3E5EF;
+  --green: #16845B;
+  --red: #B42336;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter,-apple-system,BlinkMacSystemFont,
+    "Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  font-size: 14px;
+}
+
+button,input,textarea,select { font: inherit; }
+button { cursor: pointer; }
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid #6259D944;
+  outline-offset: 2px;
+}
+
+[hidden] { display: none !important; }
+
+.btn {
+  height: 35px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  color: var(--text);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.btn:hover { background: #F7F7FB; }
+
+.btn-primary {
+  background: var(--brand);
+  color: white;
+  border-color: var(--brand);
+}
+
+.btn-primary:hover { background: var(--brand-hover); }
+
+.spacer { flex: 1; }
+
+/* Header */
+
+.header {
+  height: 64px;
+  background: white;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 5%;
+  gap: 12px;
+  position: relative;
+  z-index: 5;
+}
+
+.logo {
+  width: 33px;
+  height: 33px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: white;
+  font-size: 18px;
+  background: linear-gradient(135deg,#6259D9,#9589EF);
+}
+
+.brand {
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.header-divider {
+  height: 19px;
+  width: 1px;
+  background: var(--border);
+}
+
+.header-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.draft-badge {
+  background: #FFF5DD;
+  color: #92600D;
+  padding: 4px 9px;
+  border-radius: 20px;
+  font-size: 10px;
+}
+
+/* Create page */
+
+.create-screen {
+  min-height: calc(100vh - 64px);
+  display: flex;
+  justify-content: center;
+  padding: 65px 24px 55px;
+}
+
+.create-container {
+  width: 100%;
+  max-width: 1120px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.2fr .8fr;
+  align-items: center;
+  gap: 35px;
+  margin-bottom: 36px;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 12px;
+  border-radius: 30px;
+  background: #EFEDFF;
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  margin-bottom: 19px;
+}
+
+.hero h1 {
+  font-size: clamp(32px,4vw,43px);
+  line-height: 1.35;
+  letter-spacing: -1.8px;
+  margin: 0;
+}
+
+.hero h1 span { color: var(--brand); }
+
+.hero p {
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--muted);
+  margin-top: 14px;
+}
+
+.hero-visual {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.visual-card {
+  width: 300px;
+  background: white;
+  border: 1px solid #E7E4FA;
+  border-radius: 15px;
+  padding: 18px;
+  box-shadow: 0 15px 40px #49439612;
+  transform: rotate(-2deg);
+}
+
+.visual-title {
+  font-size: 12px;
+  font-weight: 650;
+  margin-bottom: 17px;
+}
+
+.visual-flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.visual-node {
+  flex: 1;
+  text-align: center;
+  background: #F8F8FC;
+  border: 1px solid #ECECF4;
+  border-radius: 9px;
+  padding: 12px 4px;
+}
+
+.visual-node-icon {
+  color: var(--brand);
+  font-size: 19px;
+  margin-bottom: 7px;
+}
+
+.visual-node strong {
+  display: block;
+  font-size: 10px;
+}
+
+.visual-node small {
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.visual-arrow { color: #AAA3E9; }
+
+/* Prompt */
+
+.prompt-card {
+  background: white;
+  border: 1px solid #DCDDEC;
+  border-radius: 15px;
+  padding: 19px 21px 14px;
+  box-shadow: 0 8px 30px #302D6409;
+}
+
+.prompt-card:focus-within {
+  border-color: #A49CE9;
+  box-shadow: 0 0 0 4px #6259D912;
+}
+
+.prompt-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555B70;
+  margin-bottom: 10px;
+}
+
+.prompt-card textarea {
+  width: 100%;
+  height: 105px;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text);
+}
+
+.prompt-card textarea::placeholder { color: #A3A6B6; }
+
+.prompt-footer {
+  border-top: 1px solid #F0F0F5;
+  padding-top: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.source-trigger {
+  height: 36px;
+  padding: 0 12px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #555B70;
+  font-size: 12px;
+}
+
+.source-trigger:hover { border-color: #B9B1ED; }
+
+.source-trigger.selected {
+  color: var(--brand);
+  background: #F7F5FF;
+  border-color: #DDD7FF;
+}
+
+.generate-btn {
+  height: 39px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--brand);
+  color: white;
+  font-size: 12px;
+  font-weight: 650;
+  transition: .15s;
+}
+
+.generate-btn:hover {
+  background: var(--brand-hover);
+  transform: translateY(-1px);
+}
+
+/* Inline guidance */
+
+.create-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 13px;
+  margin-top: 12px;
+  border: 1px solid #E5E0FF;
+  border-radius: 9px;
+  background: #F5F3FF;
+  color: #5149B7;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.create-feedback.error {
+  background: #FFF3F3;
+  border-color: #F5DADA;
+  color: #A53C45;
+}
+
+.create-feedback button {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: underline;
+  padding: 3px;
+}
+
+.examples { margin-top: 42px; }
+
+.examples-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 15px;
+}
+
+.examples-heading strong { font-size: 14px; }
+
+.examples-heading span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.example-grid {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 14px;
+}
+
+.example {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 18px;
+  text-align: left;
+  transition: .15s;
+}
+
+.example:hover {
+  border-color: #BBB3EF;
+  transform: translateY(-2px);
+}
+
+.example-icon {
+  width: 35px;
+  height: 35px;
+  border-radius: 9px;
+  background: var(--brand-light);
+  color: var(--brand);
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  margin-bottom: 13px;
+}
+
+.example strong {
+  font-size: 12px;
+  display: block;
+  margin-bottom: 5px;
+}
+
+.example p {
+  font-size: 10px;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* Data source modal */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(27,27,48,.32);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 50;
+}
+
+.overlay.show { display: flex; }
+
+.modal {
+  width: min(780px,100%);
+  height: min(690px,92vh);
+  background: white;
+  border-radius: 14px;
+  box-shadow: 0 24px 70px #19172D30;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  min-height: 68px;
+  flex-shrink: 0;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-header h2 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.modal-header p {
+  font-size: 10px;
+  color: var(--muted);
+  margin: 4px 0 0;
+}
+
+.modal-title-area { flex: 1; min-width: 0; }
+
+.close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  border-radius: 7px;
+}
+
+.close:hover { background: #F2F2F8; }
+
+.modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.list-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.list-toolbar {
+  padding: 15px 22px 10px;
+  flex-shrink: 0;
+}
+
+.search {
+  width: 100%;
+  height: 37px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.category-tabs {
+  display: flex;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.category-tab {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: white;
+  color: var(--muted);
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.category-tab.active {
+  background: var(--brand-light);
+  color: var(--brand);
+  border-color: #DDD7FF;
+  font-weight: 650;
+}
+
+.source-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 22px 15px;
+}
+
+.group-title {
+  font-size: 11px;
+  font-weight: 650;
+  color: #555B70;
+  margin: 14px 0 9px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.group-title small {
+  font-weight: 400;
+  color: #999EAD;
+}
+
+.source-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 11px 12px;
+  margin-bottom: 8px;
+  transition: .13s;
+  cursor: pointer;
+}
+
+.source-row:hover {
+  border-color: #C7C1EE;
+  background: #FCFBFF;
+}
+
+.source-row.selected {
+  border-color: #A49BEA;
+  background: #FAF9FF;
+}
+
+.source-row.unavailable {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.source-check {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand);
+}
+
+.source-logo {
+  width: 37px;
+  height: 37px;
+  border-radius: 9px;
+  background: #F0F1FF;
+  color: #5960B6;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 750;
+  flex-shrink: 0;
+}
+
+.source-logo.file {
+  background: #EAF5FF;
+  color: #3277B9;
+}
+
+.source-info { flex: 1; min-width: 0; }
+
+.source-name {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.source-meta {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.source-status {
+  font-size: 10px;
+  color: var(--green);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.source-status:before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #20A36D;
+}
+
+.source-status.error { color: var(--red); }
+.source-status.error:before { background: var(--red); }
+
+.source-scroll-empty {
+  text-align: center;
+  padding: 55px 15px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.modal-footer {
+  min-height: 64px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  padding: 11px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: white;
+}
+
+.footer-count {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Add source views */
+
+.subview {
+  height: 100%;
+  overflow-y: auto;
+  padding: 22px;
+}
+
+.type-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.type-card {
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 11px;
+  padding: 20px;
+  text-align: left;
+  min-height: 160px;
+}
+
+.type-card:hover {
+  border-color: #B7AFED;
+  background: #FCFBFF;
+}
+
+.type-icon {
+  width: 41px;
+  height: 41px;
+  border-radius: 10px;
+  background: var(--brand-light);
+  color: var(--brand);
+  display: grid;
+  place-items: center;
+  font-size: 19px;
+  margin-bottom: 15px;
+}
+
+.type-card strong { font-size: 13px; }
+
+.type-card p {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin: 7px 0 0;
+}
+
+.engine-grid {
+  display: grid;
+  grid-template-columns: repeat(2,1fr);
+  gap: 11px;
+}
+
+.engine {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  padding: 13px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.engine:hover {
+  border-color: #B7AFED;
+  background: #FCFBFF;
+}
+
+.engine-icon {
+  width: 37px;
+  height: 37px;
+  background: #F0F1FF;
+  color: #5960B6;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.engine strong { font-size: 12px; }
+
+.engine small {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 13px;
+}
+
+.field { margin-bottom: 14px; }
+
+.field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.field input,.field select {
+  width: 100%;
+  height: 37px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--text);
+  background: white;
+}
+
+.field.full { grid-column: 1/-1; }
+
+.connection-result {
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 11px;
+  margin: 12px 0;
+  background: #F5F6FA;
+  color: var(--muted);
+}
+
+.connection-result.success {
+  background: #E8F8EF;
+  color: var(--green);
+}
+
+.connection-result.error {
+  background: #FDECEF;
+  color: var(--red);
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 17px;
+}
+
+.notice {
+  font-size: 10px;
+  line-height: 1.6;
+  color: #9298A9;
+  margin-top: 13px;
+}
+
+.file-drop {
+  border: 1.5px dashed #C8C5DE;
+  border-radius: 11px;
+  background: #FBFAFF;
+  padding: 30px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.file-drop:hover {
+  border-color: var(--brand);
+  background: #F5F2FF;
+}
+
+.file-drop-icon {
+  font-size: 27px;
+  color: var(--brand);
+  margin-bottom: 9px;
+}
+
+.file-drop strong { font-size: 12px; }
+
+.file-drop p {
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 7px;
+}
+
+.file-preview {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  margin-top: 15px;
+  overflow: hidden;
+}
+
+.file-preview-title {
+  padding: 10px 12px;
+  background: #F8F9FC;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.file-tags {
+  padding: 12px;
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.field-tag {
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: var(--brand-light);
+  color: #5149B7;
+  font-size: 10px;
+}
+
+/* Generation */
+
+.loading-screen {
+  min-height: calc(100vh - 64px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 25px;
+}
+
+.loading-content {
+  width: min(450px,90%);
+  text-align: center;
+}
+
+.loading-icon {
+  width: 55px;
+  height: 55px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  color: white;
+  font-size: 24px;
+  margin: auto;
+  background: linear-gradient(135deg,#6259D9,#9589EF);
+}
+
+.loading-content h2 { font-size: 20px; }
+
+.loading-content p {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.progress-list {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 10px 17px;
+  margin-top: 25px;
+  text-align: left;
+}
+
+.progress-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 0;
+  border-bottom: 1px solid #F0F0F5;
+  font-size: 12px;
+  color: #A0A4B4;
+}
+
+.progress-item:last-child { border: 0; }
+.progress-item.active { color: var(--brand); font-weight: 650; }
+.progress-item.done { color: var(--green); }
+
+.progress-icon {
+  width: 23px;
+  height: 23px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #F1F2F7;
+}
+
+/* Editor: Preview left, AI right */
+
+.editor {
+  --chat-width: 380px;
+
+  display: grid;
+  grid-template-columns: minmax(480px,1fr) 8px var(--chat-width);
+  gap: 0;
+  height: calc(100vh - 64px);
+  min-height: 580px;
+  padding: 12px;
+}
+
+.editor-preview,.editor-chat {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.editor-preview {
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-header {
+  height: 49px;
+  border-bottom: 1px solid var(--border);
+  padding: 0 17px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+}
+
+.preview-header strong { font-size: 12px; }
+
+.preview-badge {
+  font-size: 10px;
+  color: var(--brand);
+  background: var(--brand-light);
+  padding: 3px 8px;
+  border-radius: 20px;
+}
+
+.preview-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+}
+
+.preview-content h2 {
+  font-size: 20px;
+  margin: 0 0 6px;
+}
+
+.preview-content > p {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 23px;
+}
+
+.generated-modules {
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 12px;
+  margin-bottom: 15px;
+}
+
+.module {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 15px;
+  min-width: 0;
+}
+
+.module small {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.module strong {
+  display: block;
+  font-size: 19px;
+  color: #A1A5B3;
+  margin-top: 8px;
+}
+
+.module-caption {
+  font-size: 10px;
+  color: #A1A5B3;
+  margin-top: 4px;
+}
+
+.module-table {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.module-table-head {
+  padding: 13px 15px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.module-table-empty {
+  text-align: center;
+  padding: 55px 20px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.module-table-empty strong {
+  display: block;
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 7px;
+}
+
+/* Resizer */
+
+.resizer {
+  width: 8px;
+  cursor: col-resize;
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  touch-action: none;
+}
+
+.resizer:after {
+  content: "";
+  height: 38px;
+  width: 3px;
+  background: #D6D5E4;
+  border-radius: 5px;
+  transition: .15s;
+}
+
+.resizer:hover:after,
+.resizer.dragging:after {
+  height: 55px;
+  background: var(--brand);
+  width: 4px;
+}
+
+/* AI chat */
+
+.editor-chat {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-header {
+  height: 49px;
+  padding: 0 15px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-shrink: 0;
+}
+
+.chat-brand-icon {
+  width: 25px;
+  height: 25px;
+  border-radius: 8px;
+  background: linear-gradient(135deg,#6259D9,#9589EF);
+  color: white;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+}
+
+.chat-header strong { font-size: 12px; }
+
+.chat-header small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 15px;
+}
+
+.chat-welcome {
+  display: flex;
+  gap: 9px;
+  margin-bottom: 19px;
+}
+
+.chat-welcome-icon {
+  width: 27px;
+  height: 27px;
+  border-radius: 9px;
+  background: var(--brand-light);
+  color: var(--brand);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.chat-welcome-text {
+  font-size: 11px;
+  line-height: 1.8;
+  color: #555B70;
+}
+
+.chat-welcome-text strong {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.chat-message {
+  margin-bottom: 12px;
+  border-radius: 10px;
+  padding: 11px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.chat-message.user {
+  margin-left: 28px;
+  background: #F3F0FF;
+  border: 1px solid #E9E4FF;
+}
+
+.chat-message.assistant {
+  background: #F8F9FC;
+  border: 1px solid #EEF0F5;
+}
+
+.chat-message-label {
+  font-size: 10px;
+  color: #9196A8;
+  margin-bottom: 4px;
+}
+
+.chat-suggestions { margin-top: 18px; }
+
+.chat-suggestions-title {
+  color: #9298A9;
+  font-size: 10px;
+  margin-bottom: 8px;
+}
+
+.chat-suggestion {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  padding: 9px;
+  margin-bottom: 7px;
+  font-size: 10px;
+  color: #555B70;
+}
+
+.chat-suggestion:hover {
+  border-color: #B9B1ED;
+  color: var(--brand);
+  background: #FCFBFF;
+}
+
+.chat-composer {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+  flex-shrink: 0;
+}
+
+.chat-composer-box {
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.chat-composer-box:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px #6259D91A;
+}
+
+.chat-composer textarea {
+  border: 0;
+  outline: 0;
+  width: 100%;
+  height: 65px;
+  resize: vertical;
+  font-size: 11px;
+}
+
+.chat-composer-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chat-hint {
+  font-size: 9px;
+  color: #9298A9;
+}
+
+.chat-send {
+  width: 29px;
+  height: 29px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--brand);
+  color: white;
+}
+
+.chat-send:hover { background: var(--brand-hover); }
+
+.toast {
+  position: fixed;
+  bottom: 23px;
+  right: 23px;
+  background: #24243A;
+  color: white;
+  padding: 11px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: .2s;
+  z-index: 100;
+}
+
+.toast.show { opacity: 1; }
+
+/* Responsive */
+
+@media(max-width:900px) {
+  .main { padding-top: 45px; }
+  .hero { grid-template-columns: 1fr .65fr; }
+  .hero-visual { transform: scale(.85); }
+
+  .editor {
+    --chat-width: 320px;
+    grid-template-columns: minmax(400px,1fr) 8px var(--chat-width);
+  }
+}
+
+@media(max-width:680px) {
+  .header { padding: 0 13px; }
+  .header-label,.header-divider { display: none; }
+  .main { width: calc(100% - 28px); padding-top: 35px; }
+  .hero { display: block; }
+  .hero-visual { display: none; }
+  .hero h1 { font-size: 31px; }
+  .example-grid { grid-template-columns: 1fr; }
+
+  .modal { height: 95vh; }
+  .modal-header { padding: 0 13px; }
+  .modal-body { overflow: hidden; }
+  .list-toolbar,.source-scroll { padding-left: 13px; padding-right: 13px; }
+  .modal-footer { padding: 10px 13px; }
+  .source-status { display: none; }
+
+  .type-grid,.engine-grid,.form-grid { grid-template-columns: 1fr; }
+
+  .editor {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: calc(100vh - 64px);
+  }
+
+  .editor-preview { min-height: 450px; }
+  .editor-chat { min-height: 430px; }
+  .resizer { display: none; }
+
+  .generated-modules { gap: 6px; }
+  .module { padding: 9px; }
+  .module strong { font-size: 15px; }
+}
+
+@media(prefers-reduced-motion:reduce) {
+  *,*::before,*::after {
+    transition-duration:.01ms!important;
+    animation-duration:.01ms!important;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<header class="header">
+  <div class="logo">✦</div>
+  <span class="brand">Shuriva</span>
+  <span class="header-divider"></span>
+  <span class="header-label" id="headerLabel">新建工作台</span>
+
+  <div class="spacer"></div>
+
+  <div class="header-actions" id="editorActions" hidden>
+    <span class="draft-badge" id="draftBadge">未保存</span>
+    <button class="btn" onclick="discardWorkspace()">放弃修改</button>
+    <button class="btn btn-primary" onclick="saveWorkspace()">✓ 保存工作台</button>
+  </div>
+</header>
+
+<!-- 创建入口 -->
+
+<main class="create-screen" id="createScreen">
+  <div class="create-container">
+
+    <section class="hero">
+      <div>
+        <div class="eyebrow">✦ AI BUSINESS WORKSPACE</div>
+        <h1>让数据变成<br><span>你真正需要的工作台。</span></h1>
+        <p>
+          告诉 Shuriva 你想完成什么业务任务。<br>
+          连接现有数据，AI 帮你生成专属工作台。
+        </p>
+      </div>
+
+      <div class="hero-visual">
+        <div class="visual-card">
+          <div class="visual-title">从数据到业务工具</div>
+          <div class="visual-flow">
+            <div class="visual-node">
+              <div class="visual-node-icon">▤</div>
+              <strong>数据源</strong>
+              <small>Database</small>
+            </div>
+            <span class="visual-arrow">→</span>
+            <div class="visual-node">
+              <div class="visual-node-icon">✦</div>
+              <strong>AI 理解</strong>
+              <small>Intelligence</small>
+            </div>
+            <span class="visual-arrow">→</span>
+            <div class="visual-node">
+              <div class="visual-node-icon">▦</div>
+              <strong>工作台</strong>
+              <small>Workspace</small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="prompt-card">
+      <div class="prompt-label">描述你想完成的业务任务</div>
+
+      <textarea id="prompt"
+        placeholder="例如：创建一个订单管理工作台，可以查询订单、筛选异常订单，并统计每日销售金额……"
+        aria-label="描述业务需求"></textarea>
+
+      <div class="prompt-footer">
+        <button class="source-trigger" id="sourceTrigger">
+          <span>＋</span>
+          <span id="sourceLabel">选择数据源</span>
+        </button>
+
+        <!-- 始终可点击，不设置 disabled -->
+        <button class="generate-btn" id="generateBtn">
+          开始构建工作台 →
+        </button>
+      </div>
+    </section>
+
+    <!-- 操作引导提示 -->
+    <div class="create-feedback" id="createFeedback" role="status" aria-live="polite" hidden>
+      <span id="feedbackText"></span>
+      <button id="feedbackAction" type="button" hidden></button>
+    </div>
+
+    <section class="examples">
+      <div class="examples-heading">
+        <strong>从一个业务场景开始</strong>
+        <span>选择示例，自动填入需求</span>
+      </div>
+
+      <div class="example-grid">
+        <button class="example" data-prompt="创建一个订单管理工作台，支持订单搜索、异常筛选和销售金额统计。">
+          <div class="example-icon">▤</div>
+          <strong>订单管理</strong>
+          <p>订单查询、异常排查、销售统计</p>
+        </button>
+
+        <button class="example" data-prompt="创建一个客户管理工作台，可以搜索客户、查看客户资料和消费记录。">
+          <div class="example-icon">♙</div>
+          <strong>客户管理</strong>
+          <p>客户资料、消费记录、客户分析</p>
+        </button>
+
+        <button class="example" data-prompt="创建一个订阅分析工作台，查看订阅状态、到期时间和续费情况。">
+          <div class="example-icon">◷</div>
+          <strong>订阅分析</strong>
+          <p>订阅状态、到期提醒、续费分析</p>
+        </button>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<!-- 数据源选择弹窗 -->
+
+<div class="overlay" id="sourceModal">
+  <div class="modal">
+
+    <div class="modal-header">
+      <div class="modal-title-area">
+        <h2 id="modalTitle">选择数据源</h2>
+        <p id="modalSubtitle">选择已有数据源，或添加新的数据库和文件。</p>
+      </div>
+
+      <!-- 固定在顶部，不随列表滚动 -->
+      <button class="btn btn-primary" id="addSourceTop">
+        ＋ 添加数据源
+      </button>
+
+      <button class="close" id="closeModal" aria-label="关闭">×</button>
+    </div>
+
+    <div class="modal-body">
+
+      <section class="list-view" id="viewList">
+        <div class="list-toolbar">
+          <input class="search" id="sourceSearch"
+            placeholder="搜索数据源名称、数据库类型或文件名...">
+
+          <div class="category-tabs">
+            <button class="category-tab active" data-filter="all">全部</button>
+            <button class="category-tab" data-filter="database">数据库</button>
+            <button class="category-tab" data-filter="file">文件</button>
+          </div>
+        </div>
+
+        <!-- 数据源列表单独滚动 -->
+        <div class="source-scroll" id="sourceList"></div>
+      </section>
+
+      <!-- 添加类型 -->
+      <section class="subview" id="viewType" hidden>
+        <div class="type-grid">
+          <button class="type-card" id="chooseDatabase">
+            <div class="type-icon">▤</div>
+            <strong>数据库连接</strong>
+            <p>连接 PostgreSQL、MySQL、ClickHouse、SQLite 等数据库。填写连接信息并测试。</p>
+          </button>
+
+          <button class="type-card" id="chooseFile">
+            <div class="type-icon">▧</div>
+            <strong>文件数据</strong>
+            <p>上传 CSV、Excel 或 JSON 文件，解析字段并预览数据结构。</p>
+          </button>
+        </div>
+      </section>
+
+      <!-- 数据库类型 -->
+      <section class="subview" id="viewEngine" hidden>
+        <div class="group-title">选择数据库类型</div>
+
+        <div class="engine-grid">
+          <button class="engine" data-engine="PostgreSQL">
+            <span class="engine-icon">PG</span>
+            <span><strong>PostgreSQL</strong><small>关系型数据库</small></span>
+          </button>
+
+          <button class="engine" data-engine="MySQL">
+            <span class="engine-icon">MY</span>
+            <span><strong>MySQL</strong><small>关系型数据库</small></span>
+          </button>
+
+          <button class="engine" data-engine="ClickHouse">
+            <span class="engine-icon">CH</span>
+            <span><strong>ClickHouse</strong><small>分析型数据库</small></span>
+          </button>
+
+          <button class="engine" data-engine="SQLite">
+            <span class="engine-icon">SQ</span>
+            <span><strong>SQLite</strong><small>本地数据库</small></span>
+          </button>
+        </div>
+      </section>
+
+      <!-- 数据库配置 -->
+      <section class="subview" id="viewDatabase" hidden>
+        <div class="group-title">
+          <span id="dbFormTitle">PostgreSQL 连接配置</span>
+        </div>
+
+        <div class="field">
+          <label>连接名称</label>
+          <input id="dbName" placeholder="例如：订单生产库">
+        </div>
+
+        <div class="form-grid">
+          <div class="field">
+            <label>主机地址</label>
+            <input id="dbHost" placeholder="localhost">
+          </div>
+
+          <div class="field">
+            <label>端口</label>
+            <input id="dbPort" placeholder="5432">
+          </div>
+
+          <div class="field">
+            <label>数据库名称</label>
+            <input id="dbDatabase" placeholder="database_name">
+          </div>
+
+          <div class="field">
+            <label>用户名</label>
+            <input id="dbUser" placeholder="username">
+          </div>
+
+          <div class="field full">
+            <label>密码</label>
+            <input id="dbPassword" type="password" placeholder="数据库密码">
+          </div>
+        </div>
+
+        <div class="connection-result" id="connectionResult">
+          填写连接信息后，请先测试连接。
+        </div>
+
+        <div class="form-actions">
+          <button class="btn" id="backEngine">上一步</button>
+          <button class="btn" id="testConnection">测试连接</button>
+          <button class="btn btn-primary" id="saveDatabase" disabled>保存数据源</button>
+        </div>
+
+        <p class="notice">
+          当前仅模拟连接测试。真实版本由自部署后端安全处理数据库凭证。
+        </p>
+      </section>
+
+      <!-- 文件上传 -->
+      <section class="subview" id="viewFile" hidden>
+        <div class="group-title">上传文件数据</div>
+
+        <div class="file-drop" id="fileDrop">
+          <div class="file-drop-icon">⇧</div>
+          <strong>拖放文件到这里，或点击选择文件</strong>
+          <p>支持 CSV、XLSX、JSON</p>
+          <input type="file" id="fileInput" accept=".csv,.xlsx,.json" hidden>
+        </div>
+
+        <div id="fileSelected" hidden>
+          <div class="field" style="margin-top:15px">
+            <label>数据源名称</label>
+            <input id="fileSourceName" placeholder="请输入数据源名称">
+          </div>
+
+          <div class="file-preview">
+            <div class="file-preview-title">文件结构预览</div>
+            <div class="file-tags" id="fileColumns"></div>
+          </div>
+
+          <div class="form-actions">
+            <button class="btn btn-primary" id="saveFile">保存文件数据源</button>
+          </div>
+        </div>
+
+        <p class="notice">
+          XLSX、JSON 的完整解析与字段识别需要在正式版本中实现。
+        </p>
+      </section>
+
+    </div>
+
+    <!-- 固定底部 -->
+    <div class="modal-footer" id="listFooter">
+      <span class="footer-count" id="selectedCount">已选择 0 个数据源</span>
+
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="cancelSources">取消</button>
+        <button class="btn btn-primary" id="confirmSources">确认选择</button>
+      </div>
+    </div>
+
+    <div class="modal-footer" id="backFooter" hidden>
+      <button class="btn" id="backToList">返回数据源列表</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- AI 生成状态 -->
+
+<section class="loading-screen" id="loadingScreen" hidden>
+  <div class="loading-content">
+    <div class="loading-icon">✦</div>
+    <h2>正在为你创建工作台</h2>
+    <p>正在理解需求、分析数据结构并规划工作台。</p>
+
+    <div class="progress-list">
+      <div class="progress-item" id="step1">
+        <span class="progress-icon">1</span>
+        理解业务需求
+      </div>
+
+      <div class="progress-item" id="step2">
+        <span class="progress-icon">2</span>
+        分析数据源与字段结构
+      </div>
+
+      <div class="progress-item" id="step3">
+        <span class="progress-icon">3</span>
+        生成工作台组件与布局
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 生成后的编辑器 -->
+
+<section class="editor" id="editorScreen" hidden>
+
+  <!-- 左侧工作台预览 -->
+
+  <section class="editor-preview">
+    <div class="preview-header">
+      <strong>工作台预览</strong>
+      <span class="preview-badge">未保存草稿</span>
+      <div class="spacer"></div>
+      <button class="btn" id="editorDataBtn">数据与模块</button>
+    </div>
+
+    <div class="preview-content">
+      <h2 id="workspaceTitle">业务工作台</h2>
+      <p>AI 根据你的需求生成的工作台结构</p>
+
+      <div class="generated-modules">
+        <div class="module">
+          <small>业务指标一</small>
+          <strong>--</strong>
+          <div class="module-caption">等待查询数据</div>
+        </div>
+
+        <div class="module">
+          <small>业务指标二</small>
+          <strong>--</strong>
+          <div class="module-caption">等待查询数据</div>
+        </div>
+
+        <div class="module">
+          <small>业务指标三</small>
+          <strong>--</strong>
+          <div class="module-caption">等待查询数据</div>
+        </div>
+      </div>
+
+      <div class="module-table">
+        <div class="module-table-head">业务数据列表</div>
+        <div class="module-table-empty">
+          <strong>工作台结构已生成</strong>
+          当前尚无查询结果。<br>
+          接入真实查询后，这里将展示业务数据。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 可拖动分隔条 -->
+
+  <div class="resizer"
+       id="resizer"
+       role="separator"
+       aria-label="调整预览与 AI 面板宽度"
+       aria-orientation="vertical"
+       tabindex="0"></div>
+
+  <!-- 右侧 AI -->
+
+  <aside class="editor-chat">
+    <div class="chat-header">
+      <div class="chat-brand-icon">✦</div>
+      <strong>Shuriva AI</strong>
+      <small>工作台助手</small>
+      <div class="spacer"></div>
+      <button class="btn" id="chatMore">···</button>
+    </div>
+
+    <div class="chat-body" id="chatBody">
+      <div class="chat-welcome">
+        <div class="chat-welcome-icon">✦</div>
+        <div class="chat-welcome-text">
+          <strong>工作台已生成</strong>
+          你可以继续描述想要的调整。我会更新工作台草稿，确认后再保存。
+        </div>
+      </div>
+
+      <div class="chat-message assistant">
+        已根据你的需求生成工作台结构，包含业务指标和数据列表。当前还没有真实查询结果。
+      </div>
+
+      <div class="chat-suggestions">
+        <div class="chat-suggestions-title">你可以继续调整</div>
+
+        <button class="chat-suggestion" data-edit="增加一个日期范围筛选器">
+          ＋ 增加日期范围筛选
+        </button>
+
+        <button class="chat-suggestion" data-edit="调整业务指标的展示方式">
+          ＋ 调整指标展示
+        </button>
+
+        <button class="chat-suggestion" data-edit="增加一个数据趋势图表">
+          ＋ 增加趋势图表
+        </button>
+      </div>
+    </div>
+
+    <div class="chat-composer">
+      <div class="chat-composer-box">
+        <textarea id="editPrompt"
+          placeholder="告诉我你想怎么调整工作台..."></textarea>
+
+        <div class="chat-composer-bottom">
+          <span class="chat-hint">Enter 发送 · Shift + Enter 换行</span>
+          <button class="chat-send" id="chatSend">↑</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+</section>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+/* Mock 数据源 */
+
+let sources = [
+  {id:1,name:"订单生产库",type:"PostgreSQL",kind:"database",meta:"12 张表 · 订单业务",status:"connected"},
+  {id:2,name:"客户业务库",type:"MySQL",kind:"database",meta:"8 张表 · 客户资料",status:"connected"},
+  {id:3,name:"会员明细.xlsx",type:"Excel",kind:"file",meta:"3 个工作表 · 会员数据",status:"ready"},
+  {id:4,name:"销售记录.csv",type:"CSV",kind:"file",meta:"2,450 行 · 销售记录",status:"ready"},
+  {id:5,name:"旧数据仓库",type:"ClickHouse",kind:"database",meta:"连接暂不可用",status:"error"}
+];
+
+let selectedIds = new Set();
+let committedIds = new Set();
+let currentFilter = "all";
+let currentEngine = "";
+let selectedFile = null;
+let nextId = 6;
+let created = false;
+
+/* 通用反馈 */
+
+function toast(message) {
+  const el = $("toast");
+  el.textContent = message;
+  el.classList.add("show");
+
+  clearTimeout(window.toastTimer);
+  window.toastTimer = setTimeout(() => {
+    el.classList.remove("show");
+  },2300);
+}
+
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g,c => ({
+    "&":"&amp;",
+    "<":"&lt;",
+    ">":"&gt;",
+    '"':"&quot;",
+    "'":"&#39;"
+  })[c]);
+}
+
+/* 创建页引导 */
+
+function showCreateFeedback(message,actionLabel,action,type="info") {
+  const feedback = $("createFeedback");
+
+  $("feedbackText").textContent = message;
+
+  const button = $("feedbackAction");
+  button.hidden = !actionLabel;
+
+  button.textContent = actionLabel || "";
+  button.onclick = action || null;
+
+  feedback.classList.toggle("error",type==="error");
+  feedback.hidden = false;
+}
+
+function clearCreateFeedback() {
+  $("createFeedback").hidden = true;
+}
+
+$("prompt").addEventListener("input",clearCreateFeedback);
+
+/*
+ * 主按钮始终可用。
+ * 不通过 disabled 控制前置条件。
+ */
+$("generateBtn").disabled = false;
+
+$("generateBtn").addEventListener("click",() => {
+  const prompt = $("prompt").value.trim();
+
+  if(!prompt) {
+    showCreateFeedback(
+      "先描述一下你想创建什么工作台，我们才能开始构建。",
+      "填写需求",
+      () => {
+        $("prompt").focus();
+        $("prompt").scrollIntoView({
+          behavior:"smooth",
+          block:"center"
+        });
+      },
+      "error"
+    );
+
+    $("prompt").focus();
+    return;
+  }
+
+  if(committedIds.size === 0) {
+    showCreateFeedback(
+      "还没有选择数据源。选择数据库或上传文件后，AI 就可以分析你的业务数据。",
+      "选择数据源",
+      () => openModal()
+    );
+
+    openModal();
+    return;
+  }
+
+  clearCreateFeedback();
+  startGeneration();
+});
+
+/* 示例填入 */
+
+document.querySelectorAll("[data-prompt]").forEach(btn => {
+  btn.addEventListener("click",() => {
+    $("prompt").value = btn.dataset.prompt;
+    clearCreateFeedback();
+    $("prompt").focus();
+  });
+});
+
+/* 数据源选择 */
+
+function openModal() {
+  selectedIds = new Set(committedIds);
+  showView("list");
+  renderSources();
+  $("sourceModal").classList.add("show");
+}
+
+function closeModal() {
+  $("sourceModal").classList.remove("show");
+}
+
+$("sourceTrigger").onclick = openModal;
+$("closeModal").onclick = closeModal;
+$("cancelSources").onclick = closeModal;
+
+$("sourceModal").addEventListener("click",e => {
+  if(e.target === $("sourceModal")) closeModal();
+});
+
+function showView(view) {
+  const views = ["list","type","engine","database","file"];
+
+  views.forEach(name => {
+    const id = "view" + name.charAt(0).toUpperCase() + name.slice(1);
+    $(id).hidden = name !== view;
+  });
+
+  const isList = view === "list";
+
+  $("listFooter").hidden = !isList;
+  $("backFooter").hidden = isList;
+  $("addSourceTop").hidden = !isList;
+
+  const titles = {
+    list:["选择数据源","选择已有数据源，或添加新的数据库和文件。"],
+    type:["添加数据源","选择要添加的数据来源类型。"],
+    engine:["选择数据库类型","选择你要连接的数据库。"],
+    database:["配置数据库连接","填写连接信息并测试连接。"],
+    file:["添加文件数据","上传文件并确认数据结构。"]
+  };
+
+  $("modalTitle").textContent = titles[view][0];
+  $("modalSubtitle").textContent = titles[view][1];
+}
+
+$("addSourceTop").onclick = () => showView("type");
+$("chooseDatabase").onclick = () => showView("engine");
+$("chooseFile").onclick = () => showView("file");
+
+$("backEngine").onclick = () => showView("engine");
+$("backToList").onclick = () => {
+  showView("list");
+  renderSources();
+};
+
+/* 数据源筛选 */
+
+document.querySelectorAll("[data-filter]").forEach(btn => {
+  btn.onclick = () => {
+    currentFilter = btn.dataset.filter;
+
+    document.querySelectorAll("[data-filter]").forEach(item => {
+      item.classList.toggle("active",item === btn);
+    });
+
+    renderSources();
+  };
+});
+
+$("sourceSearch").addEventListener("input",renderSources);
+
+/* 数据源列表 */
+
+function renderSources() {
+  const query = $("sourceSearch").value.trim().toLowerCase();
+
+  const filtered = sources.filter(source => {
+    const category =
+      currentFilter === "all" || source.kind === currentFilter;
+
+    const matches =
+      source.name.toLowerCase().includes(query) ||
+      source.type.toLowerCase().includes(query);
+
+    return category && matches;
+  });
+
+  let html = "";
+
+  if(!filtered.length) {
+    html = `
+      <div class="source-scroll-empty">
+        没有找到符合条件的数据源
+      </div>
+    `;
+  } else {
+    const groups = [
+      {key:"database",name:"数据库"},
+      {key:"file",name:"文件"}
+    ];
+
+    groups.forEach(group => {
+      const items = filtered.filter(item => item.kind === group.key);
+
+      if(!items.length) return;
+
+      html += `
+        <div class="group-title">
+          ${group.name}
+          <small>${items.length} 个</small>
+        </div>
+      `;
+
+      items.forEach(source => {
+        const checked = selectedIds.has(source.id);
+        const unavailable = source.status === "error";
+
+        const icons = {
+          PostgreSQL:"PG",
+          MySQL:"MY",
+          ClickHouse:"CH",
+          SQLite:"SQ",
+          Excel:"XL",
+          CSV:"CSV",
+          JSON:"JS"
+        };
+
+        html += `
+          <label class="source-row
+            ${checked?"selected":""}
+            ${unavailable?"unavailable":""}">
+
+            <input class="source-check"
+              type="checkbox"
+              data-id="${source.id}"
+              ${checked?"checked":""}
+              ${unavailable?"disabled":""}>
+
+            <div class="source-logo ${source.kind==="file"?"file":""}">
+              ${icons[source.type] || "DB"}
+            </div>
+
+            <div class="source-info">
+              <div class="source-name">${escapeHTML(source.name)}</div>
+              <div class="source-meta">
+                ${escapeHTML(source.type)} · ${escapeHTML(source.meta)}
+              </div>
+            </div>
+
+            <span class="source-status ${unavailable?"error":""}">
+              ${unavailable?"连接失败":source.kind==="file"?"可用":"已连接"}
+            </span>
+
+          </label>
+        `;
+      });
+    });
+  }
+
+  $("sourceList").innerHTML = html;
+
+  $("sourceList").querySelectorAll("[data-id]").forEach(input => {
+    input.addEventListener("change",() => {
+      const id = Number(input.dataset.id);
+
+      if(input.checked) selectedIds.add(id);
+      else selectedIds.delete(id);
+
+      renderSources();
+    });
+  });
+
+  $("selectedCount").textContent =
+    `已选择 ${selectedIds.size} 个数据源`;
+}
+
+/* 确认数据源 */
+
+$("confirmSources").onclick = () => {
+  committedIds = new Set(selectedIds);
+
+  renderSelectedCount();
+  clearCreateFeedback();
+  updateEditorSourceCount();
+
+  closeModal();
+
+  toast(`已选择 ${committedIds.size} 个数据源`);
+};
+
+/* 创建页只显示数量，不显示名称 */
+
+function renderSelectedCount() {
+  const count = committedIds.size;
+
+  $("sourceLabel").textContent = count
+    ? `已选择 ${count} 个数据源 · 管理`
+    : "选择数据源";
+
+  $("sourceTrigger").classList.toggle("selected",count > 0);
+}
+
+function updateEditorSourceCount() {
+  const badge = $("editorSourceCount");
+  if(badge) badge.textContent = `${committedIds.size} 个数据源`;
+}
+
+/* 数据库添加 */
+
+document.querySelectorAll("[data-engine]").forEach(btn => {
+  btn.onclick = () => {
+    currentEngine = btn.dataset.engine;
+
+    $("dbFormTitle").textContent =
+      currentEngine + " 连接配置";
+
+    const ports = {
+      PostgreSQL:"5432",
+      MySQL:"3306",
+      ClickHouse:"8123",
+      SQLite:""
+    };
+
+    $("dbPort").value = ports[currentEngine];
+
+    ["dbName","dbHost","dbDatabase","dbUser","dbPassword"]
+      .forEach(id => $(id).value = "");
+
+    $("connectionResult").className = "connection-result";
+    $("connectionResult").textContent =
+      "填写连接信息后，请先测试连接。";
+
+    $("saveDatabase").disabled = true;
+
+    showView("database");
+  };
+});
+
+$("testConnection").onclick = () => {
+  const required = ["dbName","dbHost","dbDatabase","dbUser"];
+
+  if(required.some(id => !$(id).value.trim())) {
+    $("connectionResult").className =
+      "connection-result error";
+
+    $("connectionResult").textContent =
+      "请先填写必填连接信息。";
+
+    return;
+  }
+
+  const btn = $("testConnection");
+
+  btn.disabled = true;
+  btn.textContent = "测试中…";
+
+  $("connectionResult").textContent =
+    "正在模拟测试连接…";
+
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = "重新测试";
+
+    $("connectionResult").className =
+      "connection-result success";
+
+    $("connectionResult").textContent =
+      "✓ 模拟连接成功，可以保存数据源。";
+
+    $("saveDatabase").disabled = false;
+  },800);
+};
+
+$("saveDatabase").onclick = () => {
+  const name = $("dbName").value.trim();
+  if(!name) return;
+
+  const source = {
+    id:nextId++,
+    name,
+    type:currentEngine,
+    kind:"database",
+    meta:$("dbDatabase").value + " · 新添加",
+    status:"connected"
+  };
+
+  sources.push(source);
+  selectedIds.add(source.id);
+
+  renderSources();
+  showView("list");
+  renderSources();
+
+  toast("数据库数据源已添加");
+};
+
+/* 文件上传 */
+
+$("fileDrop").onclick = () => $("fileInput").click();
+
+$("fileDrop").addEventListener("dragover",e => {
+  e.preventDefault();
+  $("fileDrop").style.borderColor = "var(--brand)";
+});
+
+$("fileDrop").addEventListener("dragleave",() => {
+  $("fileDrop").style.borderColor = "";
+});
+
+$("fileDrop").addEventListener("drop",e => {
+  e.preventDefault();
+  $("fileDrop").style.borderColor = "";
+
+  if(e.dataTransfer.files.length) {
+    handleFile(e.dataTransfer.files[0]);
+  }
+});
+
+$("fileInput").addEventListener("change",e => {
+  if(e.target.files.length) handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+  const ext = file.name.split(".").pop().toLowerCase();
+
+  if(!["csv","xlsx","json"].includes(ext)) {
+    toast("目前支持 CSV、XLSX、JSON");
+    return;
+  }
+
+  selectedFile = file;
+
+  $("fileSelected").hidden = false;
+  $("fileSourceName").value =
+    file.name.replace(/\.[^.]+$/,"");
+
+  if(ext === "csv") {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const line = String(reader.result).split(/\r?\n/)[0] || "";
+
+      const fields = line.split(",").map(x =>
+        x.trim().replace(/^["']|["']$/g,"")
+      );
+
+      renderFileFields(fields);
+    };
+
+    reader.readAsText(file);
+  } else {
+    renderFileFields(
+      ext === "xlsx"
+        ? ["工作表待选择","字段待解析"]
+        : ["JSON 字段待解析"]
+    );
+  }
+}
+
+function renderFileFields(fields) {
+  $("fileColumns").innerHTML = fields.map(field =>
+    `<span class="field-tag">${escapeHTML(field)}</span>`
+  ).join("");
+}
+
+$("saveFile").onclick = () => {
+  if(!selectedFile) return;
+
+  const name = $("fileSourceName").value.trim();
+
+  if(!name) {
+    toast("请输入文件数据源名称");
+    $("fileSourceName").focus();
+    return;
+  }
+
+  const ext = selectedFile.name.split(".").pop().toLowerCase();
+
+  const source = {
+    id:nextId++,
+    name,
+    type:ext === "xlsx" ? "Excel" : ext.toUpperCase(),
+    kind:"file",
+    meta:"已上传 · 待正式解析",
+    status:"ready"
+  };
+
+  sources.push(source);
+  selectedIds.add(source.id);
+
+  selectedFile = null;
+  $("fileInput").value = "";
+  $("fileSelected").hidden = true;
+
+  renderSources();
+  showView("list");
+  renderSources();
+
+  toast("文件数据源已添加");
+};
+
+/* AI 构建流程 */
+
+function startGeneration() {
+  $("createScreen").hidden = true;
+  $("loadingScreen").hidden = false;
+
+  const steps = ["step1","step2","step3"];
+  let index = 0;
+
+  steps.forEach(id => {
+    $(id).classList.remove("active","done");
+    $(id).querySelector(".progress-icon").textContent =
+      steps.indexOf(id)+1;
+  });
+
+  function next() {
+    if(index > 0) {
+      $(steps[index-1]).classList.remove("active");
+      $(steps[index-1]).classList.add("done");
+      $(steps[index-1]).querySelector(".progress-icon").textContent = "✓";
+    }
+
+    if(index < steps.length) {
+      $(steps[index]).classList.add("active");
+      index++;
+      setTimeout(next,700);
+    } else {
+      setTimeout(showEditor,500);
+    }
+  }
+
+  next();
+}
+
+function showEditor() {
+  $("loadingScreen").hidden = true;
+  $("editorScreen").hidden = false;
+  $("editorActions").hidden = false;
+
+  const prompt = $("prompt").value;
+
+  const title = prompt.includes("订单")
+    ? "订单管理工作台"
+    : prompt.includes("客户")
+      ? "客户管理工作台"
+      : prompt.includes("订阅")
+        ? "订阅分析工作台"
+        : "业务工作台";
+
+  $("workspaceTitle").textContent = title;
+  $("headerLabel").textContent = title;
+
+  $("draftBadge").textContent = "未保存草稿";
+
+  created = true;
+
+  updateEditorSourceCount();
+  initResizer();
+}
+
+/* AI 修改 */
+
+function sendEditMessage(text) {
+  const value = (text || $("editPrompt").value).trim();
+  if(!value) return;
+
+  const userMessage = document.createElement("div");
+  userMessage.className = "chat-message user";
+
+  const label = document.createElement("div");
+  label.className = "chat-message-label";
+  label.textContent = "你";
+
+  const content = document.createElement("div");
+  content.textContent = value;
+
+  userMessage.append(label,content);
+
+  $("chatBody").appendChild(userMessage);
+  $("editPrompt").value = "";
+
+  const waiting = document.createElement("div");
+  waiting.className = "chat-message assistant";
+  waiting.textContent = "正在理解修改需求…";
+
+  $("chatBody").appendChild(waiting);
+  $("chatBody").scrollTop = $("chatBody").scrollHeight;
+
+  $("draftBadge").textContent = "未保存修改";
+
+  setTimeout(() => {
+    waiting.textContent =
+      "已收到修改需求。当前为 Mock 原型，尚未连接真实 AI 修改服务。";
+
+    toast("修改请求已模拟提交");
+  },700);
+}
+
+$("chatSend").onclick = () => sendEditMessage();
+
+$("editPrompt").addEventListener("keydown",e => {
+  if(e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    sendEditMessage();
+  }
+});
+
+document.querySelectorAll("[data-edit]").forEach(btn => {
+  btn.onclick = () => sendEditMessage(btn.dataset.edit);
+});
+
+/* 编辑器数据源入口 */
+
+$("editorDataBtn").onclick = openModal;
+
+$("chatMore").onclick = () => toast("更多操作（原型演示）");
+
+/* 拖动调整左右宽度 */
+
+function initResizer() {
+  const editor = $("editorScreen");
+  const resizer = $("resizer");
+
+  let dragging = false;
+
+  resizer.onpointerdown = e => {
+    dragging = true;
+    resizer.classList.add("dragging");
+    resizer.setPointerCapture(e.pointerId);
+    document.body.style.cursor = "col-resize";
+    e.preventDefault();
+  };
+
+  resizer.onpointermove = e => {
+    if(!dragging) return;
+
+    const rect = editor.getBoundingClientRect();
+    const rightWidth = rect.right - e.clientX - 4;
+
+    const minChat = 300;
+    const maxChat = Math.min(620,rect.width - 488);
+
+    const width = Math.max(
+      minChat,
+      Math.min(maxChat,rightWidth)
+    );
+
+    editor.style.setProperty("--chat-width",width+"px");
+  };
+
+  function stopDrag() {
+    dragging = false;
+    resizer.classList.remove("dragging");
+    document.body.style.cursor = "";
+  }
+
+  resizer.onpointerup = stopDrag;
+  resizer.onpointercancel = stopDrag;
+
+  resizer.onkeydown = e => {
+    const current = parseInt(
+      getComputedStyle(editor).getPropertyValue("--chat-width")
+    ) || 380;
+
+    if(e.key === "ArrowLeft") {
+      editor.style.setProperty(
+        "--chat-width",
+        Math.min(620,current+20)+"px"
+      );
+      e.preventDefault();
+    }
+
+    if(e.key === "ArrowRight") {
+      editor.style.setProperty(
+        "--chat-width",
+        Math.max(300,current-20)+"px"
+      );
+      e.preventDefault();
+    }
+  };
+}
+
+/* 保存和放弃 */
+
+function saveWorkspace() {
+  if(!created) return;
+
+  $("draftBadge").textContent = "已保存";
+  $("draftBadge").style.background = "#E8F8EF";
+  $("draftBadge").style.color = "#16845B";
+
+  toast("工作台已保存（原型演示）");
+}
+
+function discardWorkspace() {
+  if(!confirm("确定放弃当前修改吗？")) return;
+
+  created = false;
+
+  $("editorScreen").hidden = true;
+  $("editorActions").hidden = true;
+  $("loadingScreen").hidden = true;
+  $("createScreen").hidden = false;
+
+  $("headerLabel").textContent = "新建工作台";
+
+  toast("已返回创建入口");
+}
+
+/* 初始化 */
+
+renderSelectedCount();
+renderSources();
+
+</script>
+</body>
+</html>

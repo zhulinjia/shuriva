@@ -1,0 +1,133 @@
+150: A.activeWs=()=>A.ui.route==='editor'?A.ui.draft:A.workspace();
+151: A.cancelGeneration=()=>{A.ui.generationToken=(A.ui.generationToken||0)+1;A.ui.generating=false;};
+152: A.closeModal=()=>{A.ui.modal=null;A.ui.sourceForm=null;A.ui.testResult=null;A.ui.testing=false;A.ui.testToken=(A.ui.testToken||0)+1;A.render();if(A.ui.returnFocusId)document.getElementById(A.ui.returnFocusId)?.focus();};
+153: A.openModal=(name)=>{A.ui.returnFocusId=document.activeElement?.id;A.ui.modal=name;A.render();};
+154: A.confirm=(title,text,fn,label='确认')=>{A.ui.confirmTitle=title;A.ui.confirmText=text;A.ui.confirmFn=fn;A.ui.confirmLabel=label;A.openModal('confirm');};
+155: A.navigate=(route,id,force=false)=>{
+156: if(A.ui.route==='editor'&&A.ui.editorDirty&&route!=='editor'&&!force){A.confirm('离开未保存的草稿？','当前草稿保留在这个浏览器；已保存的工作台不会被修改。',()=>{if(A.ui.editorOriginal){A.state.drafts[A.ui.editorOriginal.id]=structuredClone(A.ui.draft);A.save();}A.ui.editorDirty=false;A.navigate(route,id,true);},'保留草稿并离开');return;}
+157: if(A.ui.route==='permissions'&&A.ui.policyDirty&&route!=='permissions'&&!force){A.confirm('放弃策略修改？','尚未保存的数据权限修改不会生效。',()=>{A.ui.policyDraft=null;A.ui.policyDirty=false;A.navigate(route,id,true);},'放弃并离开');return;}
+158:  if(A.ui.route==='editor'&&route!=='editor')A.cancelGeneration();A.ui.modal=null;A.ui.navOpen=false;A.ui.route=route;if(id)A.ui.workspaceId=id;const
+158: next='#/'+route+(id?'/'+encodeURIComponent(id):'');if(location.hash!==next)history.pushState(null,'',next);A.ui.lastRoute=location.hash;A.render();window.scrollTo(0,0);
+159: };
+160: A.changeDirty=()=>{A.ui.editorDirty=true;if(A.ui.editorOriginal){A.state.drafts[A.ui.editorOriginal.id]=structuredClone(A.ui.draft);A.save();}};
+161: A.ensurePolicyDraft=()=>{if(!A.ui.policyDraft)A.ui.policyDraft=structuredClone(A.state.policies[A.ui.permissionRole]);return A.ui.policyDraft;};
+162: A.actions={
+163:  'nav':el=>A.navigate(el.dataset.page),
+164:  'toggle-nav':()=>{A.ui.navOpen=!A.ui.navOpen;A.render();},
+165:  'close-modal':()=>A.closeModal(),
+166:  'confirm-action':()=>{const fn=A.ui.confirmFn;A.ui.modal=null;A.ui.confirmFn=null;if(fn)fn();},
+167:  'open-workspace':el=>{const
+167: id=el.dataset.id;if(!A.state.workspaces.some(w=>w.id===id)){A.toast('示例工作台已删除，请从目录选择或重置演示数据','error');return;}A.ui.search='';A.ui.channel='all';A.ui.customer='all';A.ui.page=1;A.ui.days=A.state.workspaces.find(w=>w.id===id).config.defaultDays||'30';A.navigate('workspace',id);},
+168:  'create-workspace':()=>{const
+168: create=()=>{A.ui.modal=null;A.startEditor(undefined,'创建一个客户业务总览工作台','customer',A.ui.createSources);};if(A.ui.route==='editor'&&A.ui.editorDirty)A.confirm('新建另一个工作台？','当前未保存的创建草稿会被替换；已保存工作台的修改草稿仍保留在本地。',create,'新建工作台');else
+168: create();},
+169:  'generate-home':()=>{const prompt=(A.ui.homePrompt||'').trim();if(!prompt){A.toast('先描述需求，或点击下方示例任务','error');return;}const
+169: kind=prompt.includes('订单')&&!prompt.includes('客户')&&!prompt.includes('会员')?'orders':prompt.includes('检索')?'members':'customer';A.startEditor(undefined,prompt,kind,A.ui.createSources);},
+170:  'template':el=>{const
+170: kind=el.dataset.template;A.startEditor(undefined,kind==='customer'?'做一个客户总览，组合会员资料、订单和使用情况。':kind==='orders'?'做一个异常订单排查工作台。':'做一个高价值客户检索工作台。',kind,kind==='customer'?['orders','members','events']:kind==='orders'?['orders']:['members']);},
+171:  'edit-workspace':()=>{if(A.currentPolicy()){A.toast('当前处于普通成员预览，不能修改工作台','error');return;}A.startEditor(A.workspace()?.id);},
+172:  'leave-editor':()=>A.navigate(A.ui.editorOriginal?'workspace':'workspaces',A.ui.editorOriginal?.id),
+173:  'discard-editor':()=>A.confirm('放弃当前修改？','恢复已保存的工作台，不会修改任何数据库记录。',()=>{A.cancelGeneration();if(A.ui.editorOriginal){delete A.state.drafts[A.ui.editorOriginal.id];A.save();}const
+173: orig=A.ui.editorOriginal;A.ui.editorDirty=false;A.ui.draft=null;A.navigate(orig?'workspace':'workspaces',orig?.id,true);},'放弃修改'),
+174:  'save-workspace':()=>{const ws=A.ui.draft;if(A.currentPolicy()){A.toast('普通成员预览不能保存工作台修改','error');return;}const
+174: required=ws.kind==='customer'?['orders','profile',...(ws.config.showActivity?['activity']:[])]:ws.kind==='orders'?['orders']:['profile'];if(required.some(k=>!ws.bindings[k]||!A.validBinding(k,ws.bindings[k]))){A.ui.editorTab='data';A.render();A.toast('请先为所有显示中的模块绑定兼容数据源','error');return;}const
+174: w=A.normalizeWorkspace(ws);if(!w.title.trim()){A.toast('工作台名称不能为空','error');return;}const original=A.ui.editorOriginal;w.version=(original?.version||0)+1;w.updated=new
+174: Date().toISOString();if(original)w.previousDefinition={bindings:original.bindings,datasourceIds:original.datasourceIds,config:original.config};A.state.workspaces=original?A.state.workspaces.map(x=>x.id===w.id?w:x):[w,...A.state.workspaces];delete
+174: A.state.drafts[w.id];A.save();A.ui.editorDirty=false;A.ui.draft=null;A.navigate('workspace',w.id,true);A.toast('工作台已保存到当前浏览器');},
+175:  'editor-tab':el=>{A.ui.editorTab=el.dataset.tab;A.render();},
+176:  'mobile-editor':el=>{A.ui.mobileEditor=el.dataset.tab;A.render();},
+177:  'editor-suggest':el=>{A.ui.editorPrompt=el.dataset.prompt;A.render();document.getElementById('editorPrompt')?.focus();},
+178:  'send-editor':()=>{const
+178: text=(A.ui.editorPrompt||'').trim();if(!text||A.ui.generating)return;A.ui.editorPrompt='';A.ui.messages.push({role:'user',text});if(A.currentPolicy()){A.ui.messages.push({role:'assistant',text:'当前成员预览没有编辑权限；AI
+178: 也不能改变数据策略。'});A.render();return;}A.ui.generating=true;const
+178: token=(A.ui.generationToken||0)+1;A.ui.generationToken=token;A.render();setTimeout(()=>{if(token!==A.ui.generationToken||A.ui.route!=='editor')return;const d=A.ui.draft;let
+178: changes=[];if(/隐藏|移除|去掉/.test(text)&&/手机/.test(text)){d.config.showPhone=false;changes.push('在布局中隐藏手机号，不改变底层数据权限');}else
+178: if(/手机/.test(text)){d.config.showPhone=true;changes.push('显示已授权的手机号；成员脱敏规则仍然生效');}if(/成本/.test(text)){d.config.showCost=!/隐藏|移除|去掉/.test(text);changes.push(d.config.showCost?'显示有权读取的订单成本':'隐藏成本列');}if(/趋势|行为/.test(text)){if(/隐藏|移除|去掉/.test(text)){d.config.showActivity=false;changes.push('隐藏使用趋势模块');}else
+178: if(d.kind!=='customer'){changes.push('此演示只在客户总览模板支持使用趋势，当前模板未修改');}else {d.config.showActivity=true;if(!d.bindings.activity){const
+178: id=d.datasourceIds.find(id=>A.source(id)?.domain==='events');d.bindings.activity=id||'';}changes.push(d.bindings.activity?'增加使用趋势；沿用已确认的客户标识映射':'已添加趋势占位，请在数据与模块中绑定行为数据源');}}A.ui.generating=false;A.ui.messages.push({role:'assistant',text:changes.length?'草稿预览已更新，请核对后保存。':'这个请求超出当前
+178: Mock 范围。可以试试“隐藏手机号”“显示成本”或“增加使用趋势”，也可直接调整模块绑定。',changes:changes.length?changes:undefined});if(changes.length)A.changeDirty();A.render();},1100);},
+179:  'stop-generation':()=>{A.cancelGeneration();A.ui.messages.push({role:'assistant',text:'已停止模拟生成，未应用这次请求。'});A.render();},
+180:  'select-create-sources':()=>{A.ui.pickerContext='home';A.ui.pickerIds=[...(A.ui.createSources||['orders','members','events'])];A.openModal('source-picker');},
+181:  'choose-editor-sources':()=>{A.ui.pickerContext='editor';A.ui.pickerIds=[...A.ui.draft.datasourceIds];A.openModal('source-picker');},
+182:  'apply-source-picker':()=>{if(A.ui.pickerContext==='editor'){A.ui.draft.datasourceIds=[...A.ui.pickerIds];for(const [key,id]of
+182: Object.entries(A.ui.draft.bindings))if(id&&!A.ui.pickerIds.includes(id))A.ui.draft.bindings[key]='';A.changeDirty();A.ui.editorTab='data';}else
+182: A.ui.createSources=[...A.ui.pickerIds];A.ui.modal=null;A.render();A.toast('数据源范围已更新');},
+183:  'bindings':()=>A.openModal('bindings'),
+184:  'module-source':el=>{A.ui.moduleKey=el.dataset.module;A.openModal('module-source');},
+185: 'edit-bindings':()=>{A.ui.modal=null;if(A.currentPolicy()){A.render();A.toast('当前成员预览不能修改数据源绑定','error');return;}if(A.ui.route!=='editor')A.startEditor(A.workspace().id);A.ui.editorTab='data';A.render();},
+186:  'data-notes':()=>A.openModal('data-notes'),
+187:  'select-customer':el=>{A.ui.customer=el.dataset.id;A.ui.page=1;A.render();},
+188:  'clear-customer':()=>{A.ui.customer='all';A.ui.page=1;A.render();},
+189:  'reset-filters':()=>{A.ui.customer='all';A.ui.search='';A.ui.channel='all';A.ui.days='30';A.ui.page=1;A.render();},
+190:  'page-prev':()=>{A.ui.page=Math.max(1,A.ui.page-1);A.render();},
+191:  'page-next':()=>{A.ui.page++;A.render();},
+192:  'order-detail':el=>{A.ui.orderId=el.dataset.id;A.openModal('order-detail');},
+193:  'copy-order':async()=>{try{await navigator.clipboard.writeText(A.ui.orderId);A.toast('订单号已复制');}catch{A.toast('浏览器未授予复制权限，请选中订单号复制','error');}},
+194:  'refresh-workspace':()=>{A.ui.refreshing=true;A.render();A.toast('正在分别读取绑定的数据源…','info');setTimeout(()=>{A.ui.refreshing=false;const ws=A.activeWs();if(!ws)return;const
+194: unavailable=ws.datasourceIds.filter(id=>!A.sourceAccess(id).ok).length;A.render();A.toast(unavailable?`模拟刷新完成，${unavailable}
+194: 个来源不可用；其他模块已更新`:'所有授权模块已完成模拟刷新',unavailable?'info':'success');},550);},
+195:  'export-orders':()=>{const ws=A.activeWs();const q=A.queryOrders(ws,A.ui),p=A.currentPolicy();if(!A.canExport()||!q.ok){A.toast('当前角色或来源不允许导出','error');return;}const
+195: cols=[['id','订单编号'],['customer','客户'],['amount','实付金额'],['channel','支付渠道'],['status','状态'],['store','门店'],...(ws.config.showPhone&&(!p||p.fields.phone!=='hidden')?[['phone','手机号']]:[]),...(!p||p.fields.email!=='hidden'?[['email','邮箱']]:[]),...(ws.config.showCost&&(!p||p.fields.cost!=='hidden')?[['cost','成本']]:[])];const
+195: safe=v=>'"'+String(v??'').replace(/^[=+@\-\t\r]/,"'$&").replace(/"/g,'""')+'"';const
+195: csv='\ufeff'+[cols.map(c=>safe(c[1])).join(','),...q.rows.map(r=>cols.map(([k])=>safe(r[k])).join(','))].join('\r\n');const url=URL.createObjectURL(new
+195: Blob([csv],{type:'text/csv;charset=utf-8'}));const
+195: a=document.createElement('a');a.href=url;a.download='stackoryn-orders-mock.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);A.toast(`已导出 ${q.rows.length}
+195: 条授权范围内的模拟记录`);},
+196:  'source-detail':el=>{A.ui.sourceId=el.dataset.id;A.ui.sourceTab=el.dataset.tab||'overview';A.openModal('source-detail');},
+197:  'source-tab':el=>{A.ui.sourceTab=el.dataset.tab;A.render();},
+198:  'filter-engine':el=>{A.ui.engineFilter=el.dataset.value;A.render();},
+199:  'add-source':()=>A.startSourceForm(),
+200:  'edit-source':el=>A.startSourceForm(el.dataset.id),
+201:  'select-engine':el=>{const engine=el.dataset.engine;const
+201: f=A.ui.sourceForm;f.engine=engine;f.port=engine==='PostgreSQL'?'5432':engine==='MySQL'?'3306':'8443';f.domain=engine==='PostgreSQL'?'orders':engine==='MySQL'?'members':'events';f.tables={orders:['orders','payments'],members:['customers','subscriptions'],events:['user_events']}[f.domain];A.ui.testResult=null;A.render();},
+202:  'source-step-next':()=>{if(A.ui.sourceStep===1)A.ui.sourceStep=2;else if(A.ui.testResult==='success')A.ui.sourceStep=3;A.render();},
+203:  'source-step-back':()=>{A.ui.sourceStep=Math.max(1,A.ui.sourceStep-1);A.render();},
+204:  'test-source':()=>{const
+204: f=A.ui.sourceForm;if(!f.name.trim()||!f.host.trim()||!f.database.trim()||!f.username.trim()||!Number.isInteger(Number(f.port))||Number(f.port)<1||Number(f.port)>65535){A.ui.formError='请填写名称、主机、数据库、模拟账号和有效端口。';A.render();return;}A.ui.formError='';A.ui.testing=true;A.ui.testResult=null;const
+204: token=(A.ui.testToken||0)+1;A.ui.testToken=token;A.render();setTimeout(()=>{if(token!==A.ui.testToken||A.ui.modal!=='source-form')return;A.ui.testing=false;A.ui.testResult=f.fail||f.host.includes('fail')?'error':'success';A.render();},650);},
+205:  'save-source':()=>{const f=A.ui.sourceForm;if(A.ui.testResult!=='success'||!f.tables.length)return;const id=A.ui.editSourceId||A.uid('ds');const
+205: ds={id,name:f.name.trim(),host:f.host.trim(),port:f.port,database:f.database.trim(),engine:f.engine,environment:f.environment,state:'connected',tables:[...f.tables],domain:f.domain,ssl:f.ssl,updated:'刚刚'};const
+205: refs=A.state.workspaces.some(w=>Object.entries(w.bindings).some(([key,sid])=>sid===id&&A.bindingDomain[key]!==f.domain));if(refs){A.toast('此来源已被模块引用，不能直接变更其示例业务结构','error');return;}if(A.ui.editSourceId)A.state.sources=A.state.sources.map(s=>s.id===id?ds:s);else
+205: A.state.sources.push(ds);A.save();A.ui.sourceForm=null;A.ui.modal=null;A.ui.testResult=null;A.render();A.toast('已保存模拟数据源，未保存密码或建立真实连接');},
+206:  'toggle-source':el=>{const
+206: s=A.source(el.dataset.id);if(!s)return;s.state=s.state==='connected'?'offline':'connected';s.updated='刚刚';A.save();A.render();A.toast(s.state==='offline'?'已模拟断开此来源；其他来源不受影响':'模拟连接已恢复');},
+207:  'restore-source':el=>{const s=A.source(el.dataset.id);if(!s)return;s.state='connected';s.updated='刚刚';A.save();A.render();A.toast('模拟连接已恢复');},
+208:  'delete-source':el=>{const
+208: id=el.dataset.id;if(A.state.workspaces.some(w=>w.datasourceIds.includes(id))){A.toast('请先解除所有工作台引用','error');return;}A.confirm('删除这个数据源？','仅删除当前浏览器里的连接配置，不会删除数据库。',()=>{A.state.sources=A.state.sources.filter(s=>s.id!==id);A.save();A.ui.modal=null;A.render();A.toast('模拟数据源已删除');},'删除连接');},
+209:  'rename-workspace':el=>{A.ui.renameId=el.dataset.id;A.ui.renameTitle=A.state.workspaces.find(w=>w.id===el.dataset.id)?.title||'';A.openModal('rename-workspace');},
+210:  'confirm-rename':()=>{const title=(A.ui.renameTitle||'').trim();if(!title)return;const w=A.state.workspaces.find(w=>w.id===A.ui.renameId);w.title=title;w.updated=new
+210: Date().toISOString();A.save();A.ui.modal=null;A.render();A.toast('名称已更新');},
+211:  'copy-workspace':el=>{const orig=A.state.workspaces.find(w=>w.id===el.dataset.id);const w=structuredClone(orig);w.id=A.uid('workspace');w.title+=' · 副本';w.version=1;w.updated=new
+211: Date().toISOString();A.state.workspaces.unshift(w);A.save();A.render();A.toast('已创建独立副本，不会复制额外数据权限');},
+212:  'delete-workspace':el=>{const id=el.dataset.id;A.confirm('删除工作台？','仅删除这个模拟界面与草稿，不会删除数据源或数据库记录。',()=>{A.state.workspaces=A.state.workspaces.filter(w=>w.id!==id);delete
+212: A.state.drafts[id];A.save();A.ui.modal=null;A.render();A.toast('工作台已删除');},'删除工作台');},
+213:  'enter-team':()=>{A.state.edition='team';A.ui.role='owner';A.save();A.navigate('permissions');},
+214: 'set-edition':el=>{A.state.edition=el.dataset.edition;A.ui.role='owner';A.ui.policyDraft=null;A.ui.policyDirty=false;A.save();A.render();A.toast(A.state.edition==='community'?'已回到单用户开源版原型':'已进入团队版设计预览，云端连接方案仍待定');},
+215:  'permission-role':el=>{const
+215: apply=()=>{A.ui.permissionRole=el.dataset.role;A.ui.policyDraft=null;A.ui.policyDirty=false;A.ui.modal=null;A.render();};if(A.ui.policyDirty)A.confirm('切换角色并放弃未保存修改？','当前策略修改尚未生效。',apply,'放弃并切换');else
+215: apply();},
+216:  'policy-tab':el=>{A.ui.scopeTab=el.dataset.tab;A.render();},
+217: 'save-policy':()=>{if(!A.ui.policyDraft)return;A.state.policies[A.ui.permissionRole]=structuredClone(A.ui.policyDraft);A.ui.policyDraft=null;A.ui.policyDirty=false;A.save();A.render();A.toast('模拟策略已保存；不是服务端授权');},
+218: 'policy-preview':()=>{if(A.ui.policyDirty)return;A.ui.role=A.ui.permissionRole;A.ui.customer='all';A.ui.page=1;A.ui.search='';A.ui.channel='all';A.navigate('workspace',A.state.workspaces.some(w=>w.id==='customer-360')?'customer-360':A.state.workspaces[0]?.id);},
+219:  'reset-demo':()=>A.confirm('重置这版演示数据？','会清除 v0.2
+219: 原型创建的工作台、数据源和策略，不影响旧版演示或真实数据库。',()=>{A.state=A.initial();A.ui={};A.ensureUI();A.save();A.navigate('home',undefined,true);A.toast('演示数据已重置');},'确认重置')
+220: };
+221: A.startSourceForm=id=>{const
+221: source=A.source(id);A.ui.editSourceId=id||null;A.ui.sourceStep=source?2:1;A.ui.testResult=null;A.ui.testing=false;A.ui.formError='';A.ui.sourceForm=source?{...structuredClone(source),username:'demo_readonly',password:'',fail:false}:{name:'',engine:'PostgreSQL',environment:'生产',host:'',port:'5432',database:'',username:'demo_readonly',password:'',ssl:true,domain:'orders',tables:['orders','payments'],fail:false};A.openModal('source-form');};
+222: A.handleInput=(el)=>{const id=el.dataset.model;if(!id)return;const value=el.type==='checkbox'?el.checked:el.value;
+223:  const
+223: simple={homePrompt:'homePrompt',editorPrompt:'editorPrompt',orderSearch:'search',orderChannel:'channel',orderDays:'days',orderSort:'sort',workspaceCustomer:'customer',sourceSearch:'sourceSearch',workspaceSearch:'workspaceSearch',workspaceSource:'workspaceSource',renameTitle:'renameTitle'};
+224:  if(id in
+224: simple){A.ui[simple[id]]=value;if(['orderSearch','orderChannel','orderDays','workspaceCustomer'].includes(id))A.ui.page=1;if(['homePrompt','editorPrompt'].includes(id))return;}
+225:  else if(id==='previewRole'){A.ui.role=value;A.ui.customer='all';A.ui.page=1;A.ui.modal=null;}
+226:  else if(id.startsWith('ds-table-')){const key=id.slice(9),f=A.ui.sourceForm;f.tables=value?[...new Set([...f.tables,key])]:f.tables.filter(t=>t!==key);}
+227:  else if(id.startsWith('ds-')){const
+227: key=id.slice(3);A.ui.sourceForm[key]=value;A.ui.testResult=null;A.ui.testing=false;A.ui.testToken=(A.ui.testToken||0)+1;if(key==='domain')A.ui.sourceForm.tables={orders:['orders','payments'],members:['customers','subscriptions'],events:['user_events']}[value];if(key==='password')return;}
+228:  else if(id.startsWith('pick-')){const sid=id.slice(5);A.ui.pickerIds=value?[...new Set([...A.ui.pickerIds,sid])]:A.ui.pickerIds.filter(x=>x!==sid);}
+229:  else if(id.startsWith('binding-')){const key=id.slice(8);if(!A.validBinding(key,value))return;A.ui.draft.bindings[key]=value;A.changeDirty();}
+230:  else if(id.startsWith('config-')){A.ui.draft.config[id.slice(7)]=value;A.changeDirty();}
+231:  else if(id.startsWith('policy-field-')){A.ensurePolicyDraft().fields[id.slice(13)]=value;A.ui.policyDirty=true;}
+232:  else if(id==='policy-rowScope'){A.ensurePolicyDraft().rowScope=value;A.ui.policyDirty=true;}
+233:  else if(id==='policy-export'||id==='policy-aiSensitive'){A.ensurePolicyDraft()[id.slice(7)]=value;A.ui.policyDirty=true;}
+234:  else if(id.startsWith('policy-source-')){const p=A.ensurePolicyDraft(),sid=id.slice(14);p.allowedSources=value?[...new
+234: Set([...p.allowedSources,sid])]:p.allowedSources.filter(x=>x!==sid);A.ui.policyDirty=true;}

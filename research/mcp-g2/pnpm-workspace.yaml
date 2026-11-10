@@ -1,7 +1,0 @@
-packages: []
-
-# This is a separate evaluation workspace. Match the application's actual
-# adapter/driver patches; package.json's historical pnpm field is not used.
-patchedDependencies:
-  '@better-auth/kysely-adapter@1.7.14': ../../patches/@better-auth__kysely-adapter@1.7.14.patch
-  mysql2@3.24.4: ../../patches/mysql2@3.24.4.patch

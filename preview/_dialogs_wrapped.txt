@@ -1,0 +1,132 @@
+112: A.pages.permissions=()=>{if(A.state.edition!=='team')return `<div class="page">${A.pageHead('TEAM DESIGN','成员与数据权限','开源版保持单用户。这一页是独立的团队权限设计预览。')}<div class="surface
+112: edition-intro">${A.icon('shield',40)}<h2>不同成员，看到不同的数据</h2><p>团队版将提供用户组、字段权限、记录范围和导出控制。它不会改变开源版的直连流程，也不预设云版连接架构。</p>${A.btn('进入团队权限预览','enter-team','','primary','arrow')}<small>仅切换原型视图，不创建组织、不邀请成员。</small></div></div>`;const
+112: role=A.ui.permissionRole||'support',p=A.ui.policyDraft||A.state.policies[role],changed=A.ui.policyDirty;const selected=(key,val,options)=>A.select(key,val,options);return `<div
+112: class="page permissions-page">${A.pageHead('TEAM · DESIGN PREVIEW','成员与数据权限','同一个工作台，按成员身份返回允许访问的数据。',A.btn('预览成员视角','policy-preview',changed?'disabled
+112: title="请先保存策略草稿"':'','secondary','eye')+A.btn('保存策略','save-policy',!changed?'disabled':'','primary','check'))}${A.notice('这是团队版的权限交互演示，不是生产鉴权。数据库连接方案仍待确定；正式规则必须由可信后端执行。','subtle','shield')}<div
+112: class="permissions-layout"><aside class="surface roles-panel"><div class="panel-label">业务角色 / 用户组</div>${Object.entries(A.state.policies).map(([id,policy])=>`<button
+112: class="role-card ${id===role?'selected':''}" data-action="permission-role" data-role="${id}"><span
+112: class="avatar">${policy.label[0]}</span><span><strong>${policy.label}</strong><small>${policy.description}</small></span>${id===role?A.icon('check',15):''}</button>`).join('')}<div
+112: class="role-footer"><span>${A.icon('users',16)}3 个演示角色</span><p>成员管理与数据读取权限分开。组织管理员不默认获得全部原始数据。</p></div></aside><section class="surface policy-panel"><div
+112: class="policy-heading"><div><h2>${p.label}</h2><p>${p.description}</p></div>${A.badge(changed?'有未保存修改':'已保存示例策略',changed?'warning':'success')}</div><div class="policy-tabs"><button
+112: data-action="policy-tab" data-tab="fields" class="${A.ui.scopeTab==='fields'?'selected':''}">字段与记录</button><button data-action="policy-tab" data-tab="sources"
+112: class="${A.ui.scopeTab==='sources'?'selected':''}">数据源与操作</button><button data-action="policy-tab" data-tab="members"
+112: class="${A.ui.scopeTab==='members'?'selected':''}">关联成员</button></div>${A.ui.scopeTab==='fields'?`<div class="policy-section"><h3>字段访问</h3><p>隐藏不只是取消勾选列；详情、复制、导出与 AI
+112: 也必须遵守。</p><table class="policy-table"><thead><tr><th>字段</th><th>访问方式</th><th>示例结果</th></tr></thead><tbody><tr><td><strong>订单编号 / 状态</strong><small>orders.id /
+112: orders.status</small></td><td>${A.badge('原文可见','success')}</td><td><code>ORD-261108-1048</code></td></tr>${[['phone','客户手机号','customers.phone','13820105678'],['email','客户邮箱','customers.email','demo@example.com'],['cost','订单成本','orders.cost','420.00']].map(([key,label,col,value])=>`<tr><td><strong>${label}</strong><small>${col}</small></td><td>${selected('policy-field-'+key,p.fields[key],[['raw','原文可见'],['masked','脱敏可见'],['hidden','不可访问']])}</td><td><span
+112: class="field-example
+112: ${p.fields[key]==='hidden'?'muted':''}">${p.fields[key]==='hidden'?'不返回字段':p.fields[key]==='masked'?(key==='cost'?'••••':A.mask(value,key)):value}</span></td></tr>`).join('')}</tbody></table></div><div
+112: class="policy-section"><h3>记录范围</h3><p>同一限制用于列表、详情、指标和导出，不能通过筛选放宽。</p>${selected('policy-rowScope',p.rowScope,[['all','全部已授权记录'],['assigned','仅本人负责的记录'],['store','仅所属门店的记录']])}<div
+112: class="rule-preview">${A.icon('code',16)}<code>${p.rowScope==='all'?'在已授权数据源和数据集中读取':p.rowScope==='assigned'?'orders.assignee_id = current_user.id':'orders.store_id IN
+112: current_user.store_ids'}</code></div><small class="muted">当前示例：客服 support-01，门店运营属于杭州门店。正式身份属性由后端确认。</small></div>`:A.ui.scopeTab==='sources'?`<div
+112: class="policy-section"><h3>允许使用的数据源</h3><p>工作台被分享，不意味着数据源读取权同时被授予。</p><div class="permission-sources">${A.state.sources.map(s=>`<label><input type="checkbox"
+112: id="policy-source-${s.id}" data-model="policy-source-${s.id}"
+112: ${p.allowedSources.includes(s.id)?'checked':''}>${A.engineIcon(s.engine)}<span><strong>${A.e(s.name)}</strong><small>${s.engine}</small></span></label>`).join('')}</div></div><div
+112: class="policy-section"><h3>额外操作</h3><label class="switch-row"><span><strong>允许导出</strong><small>仍按字段与记录规则返回结果</small></span><input id="policy-export" data-model="policy-export"
+112: type="checkbox" ${p.export?'checked':''}></label><label class="switch-row"><span><strong>敏感字段允许交给 AI</strong><small>独立授权，不因用户可见而默认允许</small></span><input id="policy-aiSensitive"
+112: data-model="policy-aiSensitive" type="checkbox" ${p.aiSensitive?'checked':''}></label>${A.notice('本原型没有发送任何数据给模型。AI 数据授权开关只演示配置，不代表已完成数据安全机制。','subtle','info')}</div>`:`<div
+112: class="policy-section"><h3>关联成员</h3><p>用于检查角色与记录范围的样例身份，不是真实账号。</p><div class="member-row"><span
+112: class="avatar">${p.label[0]}</span><span><strong>${p.label}演示成员</strong><small>${role==='support'?'support-01':role==='operator'?'store-operator-01':'finance-01'} ·
+112: ${role==='operator'?'杭州门店':'示例组织'}</small></span>${A.badge('模拟成员')}</div>${A.notice('成员邀请、登录认证、撤权和审计需要在真实后端接入时实现。','subtle')}</div>`}<div
+112: class="policy-bottom">${A.icon('lock',15)}默认拒绝 · 显式禁止优先 · 前端不是安全边界</div></section></div></div>`;};
+114: A.pages.settings=()=>`<div class="page settings-page">${A.pageHead('SETTINGS','设置与演示','区分产品部署模式与当前的设计预览。')}<div class="settings-grid"><section class="surface settings-card"><div
+114: class="section-heading"><div><h2>产品模式</h2><span>切换原型中的导航与可用设计界面</span></div></div><button class="edition-option ${A.state.edition==='community'?'selected':''}"
+114: data-action="set-edition" data-edition="community"><span class="edition-icon">${A.icon('server',24)}</span><span><strong>Community 开源版
+114: ${A.badge('当前开发重点','success')}</strong><small>单用户 · 自部署后端直连 · 多数据库、多数据源</small></span>${A.state.edition==='community'?A.icon('check',20):A.icon('chevron',17)}</button><button
+114: class="edition-option ${A.state.edition==='team'?'selected':''}" data-action="set-edition" data-edition="team"><span
+114: class="edition-icon">${A.icon('users',24)}</span><span><strong>团队版设计预览
+114: ${A.badge('未接入')}</strong><small>预览成员、字段与记录权限；云端连接方案待定</small></span>${A.state.edition==='team'?A.icon('check',20):A.icon('chevron',17)}</button></section><section class="surface
+114: settings-card"><h2>开源版的访问路径</h2><div class="architecture-path"><span>${A.icon('grid',20)}浏览器</span>${A.icon('arrow',18)}<span class="highlight">${A.icon('server',20)}你的 Stackoryn
+114: 后端</span>${A.icon('arrow',18)}<span>${A.icon('database',20)}多个数据库</span></div><p class="muted">正式产品由同一后端保存连接与工作台。其他设备访问这套服务即可使用，数据库不与浏览器直接通信。</p>${A.notice('本轮是纯前端
+114: Mock。配置只保存在当前浏览器，没有跨设备同步，也不验证数据库网络连通性。','subtle')}</section><section class="surface settings-card"><h2>局部失败演示</h2><p class="muted">只断开一个来源，检查多源工作台的其他模块是否仍可用。</p><div
+114: class="simulation-rows">${A.state.sources.map(s=>`<div><span>${A.engineIcon(s.engine)}${A.e(s.name)}</span>${A.btn(s.state==='connected'?'模拟断开':'恢复连接','toggle-source',`data-id="${s.id}"`,'secondary
+114: compact',s.state==='connected'?'logout':'refresh')}</div>`).join('')}</div>${A.btn('打开客户业务总览','open-workspace','data-id="customer-360"','text-button','arrow')}</section><section
+114: class="surface settings-card"><h2>本地演示数据</h2><p class="muted">工作台、数据源配置与权限策略保存在独立的 v0.2 存储空间，不覆盖之前的 v0.1 原型数据。</p><div class="design-boundaries"><div>${A.icon('check',15)}没有真实数据库或
+114: AI
+114: 请求</div><div>${A.icon('check',15)}连接密码不写入本地存储</div><div>${A.icon('check',15)}权限仅供交互验证，不是生产鉴权</div></div>${A.btn('重置演示数据','reset-demo','','danger','refresh')}</section></div></div>`;
+116: A.dialogContent=()=>{const modal=A.ui.modal;if(!modal)return '';const ws=A.ui.route==='editor'?A.ui.draft:A.workspace(),team=A.state.edition==='team';
+117:  if(modal==='source-detail'){
+118:   const s=A.source(A.ui.sourceId);if(!s)return '';const tab=A.ui.sourceTab||'overview',refs=A.state.workspaces.filter(w=>w.datasourceIds.includes(s.id));
+119:   return A.modal('数据源详情',`<div class="source-detail-title">${A.engineIcon(s.engine)}<div><h3>${A.e(s.name)}</h3><p>${s.engine} ·
+119: ${A.e(s.database)}</p></div>${A.status(s.state)}</div><div class="policy-tabs">${[['overview','连接配置'],['schema','可用表结构'],['usage','使用情况']].map(([k,l])=>`<button
+119: data-action="source-tab" data-tab="${k}" class="${tab===k?'selected':''}">${l}${k==='usage'?` (${refs.length})`:''}</button>`).join('')}</div>${tab==='overview'?`<dl
+119: class="detail-fields"><div><dt>连接方式</dt><dd>${team?'云版方案待定':'应用后端直连'}</dd></div><div><dt>数据库类型</dt><dd>${s.engine}</dd></div><div><dt>主机</dt><dd><code>${A.e(s.host)}</code></dd></div><div><dt>端口
+119: / 数据库</dt><dd>${s.port} /
+119: ${A.e(s.database)}</dd></div><div><dt>环境</dt><dd>${s.environment}</dd></div><div><dt>访问模式</dt><dd>${A.badge('只读','success')}</dd></div><div><dt>TLS</dt><dd>${s.ssl?'启用（配置示例）':'未启用（配置示例）'}</dd></div></dl>${A.notice('没有保存任何真实连接凭证。连接状态、表结构和查询结果全部为模拟。','subtle','lock')}`:tab==='schema'?`<p
+119: class="muted small-text">演示结构，不来自真实数据库扫描。当前允许 ${s.tables.length} 张表。</p><div class="schema-list">${s.tables.map(t=>`<details
+119: open><summary>${A.icon('table',15)}<strong>${A.e(t)}</strong><small>示例</small></summary><div><code>${({orders:'id · customer_id · amount · cost · status · store_id',payments:'id ·
+119: order_id · channel · pay_status',customers:'id · name · phone · email · store_id',subscriptions:'id · customer_id · plan · expires_at',user_events:'id · user_id · event_name ·
+119: occurred_at'})[t]||'id · created_at'}</code></div></details>`).join('')}</div>`:`<div class="usage-workspaces">${refs.map(w=>`<button data-action="open-workspace"
+119: data-id="${w.id}">${A.icon('grid',20)}<span><strong>${A.e(w.title)}</strong><small>${Object.entries(w.bindings).filter(([k,v])=>v===s.id).map(([k])=>A.bindingLabel[k]).join('、')}</small></span>${A.icon('arrow',16)}</button>`).join('')||A.empty('暂未被工作台使用','可以在创建工作台时选择这个数据源。','grid')}</div>`}`,
+120:    `${A.btn('删除','delete-source',`data-id="${s.id}" ${refs.length?'disabled title="已被工作台引用，需先解除绑定"':''}`,'danger','trash')}<span
+120: class="footer-spacer"></span>${A.btn('编辑连接','edit-source',`data-id="${s.id}"`,'secondary','edit')}${A.btn(s.state==='connected'?'模拟断开':'恢复模拟连接','toggle-source',`data-id="${s.id}"`,'primary',s.state==='connected'?'logout':'refresh')}`,false,true);
+121:  }
+122:  if(modal==='source-form'){
+123:   const f=A.ui.sourceForm,step=A.ui.sourceStep||1,engines=[['PostgreSQL','关系型数据库','5432'],['MySQL','关系型数据库','3306'],['ClickHouse','分析型数据库','8443']];const
+123: tables={orders:['orders','payments'],members:['customers','subscriptions'],events:['user_events']}[f.domain]||[];
+124:   const stepper=`<div class="stepper">${['选择类型','连接配置','访问范围'].map((label,i)=>`<div
+124: class="${step===i+1?'current':step>i+1?'complete':''}"><span>${step>i+1?'✓':i+1}</span>${label}</div>`).join('')}</div>`;
+125:   let body=step===1?`<h3 class="form-section-title">选择数据库类型</h3><p class="muted">同一种数据库可以创建多个连接，分别管理生产和测试环境。</p><div class="engine-options">${engines.map(([name,desc])=>`<button
+125: data-action="select-engine" data-engine="${name}"
+125: class="${f.engine===name?'selected':''}">${A.engineIcon(name)}<span><strong>${name}</strong><small>${desc}</small></span>${f.engine===name?A.icon('check',18):''}</button>`).join('')}</div>${A.notice('当前支持三种类型的模拟流程，不代表已接入真实驱动。','subtle')}`:step===2?`<div
+125: class="form-grid">${A.field('连接名称',A.input('ds-name',f.name,'例如：订单生产库','autocomplete="off"'))}${A.field('环境',A.select('ds-environment',f.environment,[['生产','生产'],['测试','测试'],['分析','分析']]))}${A.field('主机地址',A.input('ds-host',f.host,'db.internal.example','autocomplete="off"'))}${A.field('端口',A.input('ds-port',f.port,'5432','type="number"
+125: min="1"
+125: max="65535"'))}${A.field('数据库名',A.input('ds-database',f.database,'commerce','autocomplete="off"'))}${A.field('模拟账号',A.input('ds-username',f.username,'demo_readonly','autocomplete="off"'))}${A.field('密码（仅演示）',A.input('ds-password',f.password,'不要填写真实密码','type="password"
+125: autocomplete="new-password"'),'仅保留在当前弹窗，不写入本地存储。')}${A.field('示例业务数据',A.select('ds-domain',f.domain,[['orders','订单与支付'],['members','会员与订阅'],['events','用户行为']]))}</div><label
+125: class="checkbox-line"><input id="ds-ssl" data-model="ds-ssl" type="checkbox" ${f.ssl?'checked':''}>启用 TLS / SSL（配置示例）</label><div
+125: class="test-connection-row">${A.btn(A.ui.testing?'正在模拟测试…':'测试连接','test-source',A.ui.testing?'disabled':'','secondary','refresh')}<label><input id="ds-fail" data-model="ds-fail"
+125: type="checkbox"
+125: ${f.fail?'checked':''}>模拟连接失败</label></div>${A.ui.testResult==='success'?A.notice('模拟连接成功。下一步选择可用表；不会实际连接数据库。','success','check'):A.ui.testResult==='error'?A.notice('模拟连接失败：主机不可达。关闭“模拟连接失败”后可重试。','danger','warning'):A.ui.formError?A.notice(A.e(A.ui.formError),'danger','warning'):''}`:`<div
+125: class="connection-success"><span>${A.icon('check',24)}</span><div><strong>连接测试已通过（模拟）</strong><small>${A.e(f.name)} · ${f.engine} ·
+125: ${A.e(f.database)}</small></div>${A.badge('只读','success')}</div><h3 class="form-section-title">允许工作台使用的表</h3><p class="muted">限定可用范围。正式版本需要在后端查询层执行这些限制。</p><div
+125: class="scope-tables">${tables.map(t=>`<label><input id="ds-table-${t}" data-model="ds-table-${t}" type="checkbox"
+125: ${f.tables.includes(t)?'checked':''}>${A.icon('table',16)}<code>${t}</code><small>示例结构</small></label>`).join('')}</div>${A.notice(team?'云端连接方式另行确定，这里只保存模拟元数据。':'正式开源版由你的 Stackoryn
+125: 后端保存凭证、建立连接。其他设备访问同一服务，不需要重新添加连接。','subtle','server')}`;
+126:   return A.modal(A.ui.editSourceId?'编辑数据库连接':'添加数据源',stepper+body,`${A.btn(step===1?'取消':'上一步',step===1?'close-modal':'source-step-back','','secondary')}<span
+126: class="footer-spacer"></span>${step===3?A.btn('保存数据源','save-source',!f.tables.length?'disabled':'','primary','check'):A.btn('下一步','source-step-next',step===2&&A.ui.testResult!=='success'?'disabled':'','primary','arrow')}`,true);
+127:  }
+128:  if(modal==='source-picker'){
+129:   const set=A.ui.pickerIds||[],context=A.ui.pickerContext;
+130:   return A.modal('选择工作台数据源',`<p class="muted">可选择多个来源。每个模块独立查询；不执行任意跨库 JOIN。</p><div class="source-picker-list">${A.state.sources.map(s=>`<label class="source-picker-item
+130: ${set.includes(s.id)?'selected':''}"><input id="pick-${s.id}" data-model="pick-${s.id}" type="checkbox"
+130: ${set.includes(s.id)?'checked':''}>${A.engineIcon(s.engine)}<span><strong>${A.e(s.name)}</strong><small>${s.engine} · ${s.environment} ·
+130: ${A.e(s.database)}</small></span>${A.status(s.state)}</label>`).join('')}</div>${context==='editor'?A.notice('移除正在使用的数据源后，对应模块将进入“尚未绑定”状态。不会自动换到另一个数据库。','subtle'):''}`,`${A.btn('取消','close-modal')}<span
+130: class="footer-spacer"></span><span class="muted">已选 ${set.length} 个</span>${A.btn('确认选择','apply-source-picker',!set.length?'disabled':'','primary','check')}`,true);
+131:  }
+132:  if(modal==='bindings'||modal==='module-source'){
+133:   const key=A.ui.moduleKey,entries=Object.entries(ws.bindings).filter(([k])=>modal==='bindings'||k===key);
+134:   return A.modal(modal==='bindings'?'数据来源与联动关系':A.bindingLabel[key]+' · 数据来源',`<div class="binding-summary">${entries.map(([k,id])=>`<div class="binding-summary-row"><span
+134: class="workspace-icon">${A.icon(k==='orders'?'table':k==='profile'?'users':'chart',20)}</span><div><strong>${A.bindingLabel[k]}</strong><small><code>q_${k}</code> →
+134: ${A.e(A.source(id)?.name||'尚未绑定')}</small></div>${A.badge(A.source(id)?.engine||'未配置')}</div>`).join('')}</div><div class="rule-preview">${A.icon('link',17)}<code>customers.id →
+134: orders.customer_id<br>customers.id → user_events.user_id</code></div><p class="muted small-text">示例的关联映射已确认。选择客户后，把其标识分别作为查询参数；不是将多个库直接拼成一条
+134: SQL。</p>${A.notice('修改绑定需要进入草稿编辑，保存前不影响正在使用的工作台。','subtle')}`,`${A.btn('关闭','close-modal')}${A.btn('修改绑定','edit-bindings','','primary','settings')}`,true);
+135:  }
+136:  if(modal==='data-notes')return A.modal('数据说明',`<div class="notice subtle">${A.icon('info',18)}<div>当前所有 SQL 与结果均为示例，不会连接数据库或执行 SQL。</div></div><dl
+136: class="detail-fields"><div><dt>工作台</dt><dd>${A.e(ws.title)}</dd></div><div><dt>来源范围</dt><dd>${ws.datasourceIds.length}
+136: 个连接，各自执行查询</dd></div><div><dt>统计口径</dt><dd>订单指标统计全部匹配记录，不仅当前分页；客户与使用模块有独立口径。</dd></div><div><dt>权限</dt><dd>${A.currentPolicy()?A.currentPolicy().description:'开源版单用户模拟；当前无团队策略限制'}</dd></div></dl>${Object.entries(ws.bindings).map(([k,id])=>`<div
+136: class="sql-block"><div>${A.bindingLabel[k]} <span>${A.e(A.source(id)?.name||'未绑定')}</span></div><pre>${A.e(k==='orders'?'SELECT permitted_columns FROM orders\nWHERE (:customer_id
+136: IS NULL OR customer_id = :customer_id)\n  AND /* trusted row-scope predicate */ TRUE\nORDER BY created_at DESC LIMIT :limit;':k==='profile'?'SELECT permitted_columns FROM
+136: customers\nWHERE /* trusted row-scope predicate */ TRUE;':'SELECT date_bucket, COUNT(*) FROM user_events\nWHERE user_id = :customer_id\nGROUP BY
+136: date_bucket;')}</pre></div>`).join('')}<p class="small-note">SQL 中的权限占位只表达设计意图，不是可以直接使用的安全策略实现。</p>`,A.btn('知道了','close-modal','','primary'),true,true);
+137:  if(modal==='order-detail'){
+138:   const q=A.queryOrders(ws,A.ui),row=q.rows.find(r=>r.id===A.ui.orderId),p=A.currentPolicy();if(!row)return
+138: A.modal('订单详情',A.empty('记录不可访问','数据源、记录权限或当前筛选已变化。','lock'),A.btn('关闭','close-modal'));
+139:   const
+139: fields=[['订单编号',row.id],['客户',row.customer],['实付金额',A.money(row.amount)],...((!p||p.fields.cost!=='hidden')&&ws.config.showCost?[['订单成本',p?.fields.cost==='masked'?'••••':A.money(row.cost)]]:[]),['状态',row.status],['支付渠道',row.channel],...((!p||p.fields.phone!=='hidden')&&ws.config.showPhone&&row.phone!==undefined?[['手机号',row.phone]]:[]),...(row.email!==undefined?[['邮箱',row.email]]:[]),['门店',row.store],['创建时间',A.date(row.createdAt)]];
+140:   return A.modal('订单详情',`<div class="detail-record-title"><span
+140: class="workspace-icon">${A.icon('table',22)}</span><div><strong>${row.id}</strong><p>${row.product}</p></div>${A.badge(row.status,'warning')}</div><dl
+140: class="detail-fields">${fields.map(([l,v])=>`<div><dt>${l}${p?.fields.phone==='masked'&&l==='手机号'?A.badge('脱敏','warning'):''}</dt><dd>${A.e(v)}</dd></div>`).join('')}</dl>${p?A.notice(`当前按「${p.label}」演示策略返回字段；隐藏字段不在此详情中展示。`,'subtle','shield'):A.notice('只读预览，不提供退款或修改业务状态的操作。','subtle','lock')}`,`${A.btn('关闭','close-modal')}${A.btn('复制订单号','copy-order','','primary','copy')}`,false,true);
+141:  }
+142:  if(modal==='rename-workspace')return
+142: A.modal('重命名工作台',A.field('名称',A.input('renameTitle',A.ui.renameTitle,'工作台名称','maxlength="60"')),`${A.btn('取消','close-modal')}${A.btn('保存名称','confirm-rename',!(A.ui.renameTitle||'').trim()?'disabled':'','primary')}`);
+143:  if(modal==='confirm')return A.modal(A.ui.confirmTitle,`<p
+143: class="confirm-description">${A.e(A.ui.confirmText)}</p>`,`${A.btn('取消','close-modal')}${A.btn(A.ui.confirmLabel||'确认','confirm-action','','danger')}`);
+144:  return '';
+145: };
+147: /* Native DOM design renderer. Independent of the React19 / Vite8 implementation. */
+148: A.toast=(text,kind='success')=>{const root=document.querySelector('#toast-root');if(!root)return;const el=document.createElement('div');el.className='toast
+148: '+kind;el.setAttribute('role','status');el.innerHTML=A.icon(kind==='error'?'warning':'check',16)+`<span>${A.e(text)}</span>`;root.append(el);setTimeout(()=>el.remove(),4200);};
+149: A.render=()=>{const active=document.activeElement,focusId=active?.id,selection=active&&'selectionStart'in active?[active.selectionStart,active.selectionEnd]:null;const
+149: windowY=window.scrollY;document.querySelector('#app').innerHTML=A.shell((A.pages[A.ui.route]||A.pages.home)());const
+149: d=document.querySelector('#active-modal');if(d&&!d.open)d.showModal();if(focusId){const
+149: target=document.getElementById(focusId);if(target){target.focus({preventScroll:true});if(selection&&target.setSelectionRange)try{target.setSelectionRange(...selection);}catch{}}}window.scrollTo(0,windowY);};
+150: A.activeWs=()=>A.ui.route==='editor'?A.ui.draft:A.workspace();

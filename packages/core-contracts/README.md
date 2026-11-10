@@ -1,9 +1,0 @@
-# @shuriva/core-contracts
-
-This package extracts the current Community/Go Connector identity, read and schema task DTOs, query payload/results, heartbeat envelopes and signing-field ordering. Its version is declared in package.json and exported as coreContractVersion. It has no dependency on Community, Cloud, a database driver, or a web framework. Both hosts must implement their own authenticated dispatch adapters and enforce Connector local policy.
-
-Schema parsing verifies bounded transport structure only. It does not grant tenant/workspace access, verify a signature, validate SQL, guarantee freshness, or prove an external result. Sensitive payloads must stay out of ordinary logs and durable audit.
-
-The package is built and packed as a versioned artifact. Cloud consumes that artifact; it never imports Community application files or copies the implementation. Nothing is published automatically.
-
-`connectorHeartbeatReplySchema.task` is the existing direct wire task union. `ConnectorCommand` is an application transport port, not a heartbeat format. Convert `ReadCancel.taskId` to heartbeat `id` using `cancelReadWireTask`; its original cancel signature is preserved. A heartbeat acknowledgement signs identity and nonce; each returned task is independently signed and must be verified by the Connector. Read payloads use textual parameters (`kind`, `value`), explicit `maxRows` (1–1000), `schemaVersion` and `delegatedScope` (both required, nullable). Do not replace an absent delegation with unrestricted access. Query result validation must also apply the requested row limit, canonical base64url, a 1 MiB decoded byte limit and UTF-8 validation before parsing. Connector SQL parsing, binding, database account policy and authorization remain mandatory even when these schemas accept the object.

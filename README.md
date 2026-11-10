@@ -1,75 +1,184 @@
 # Shuriva
 
-本目录是 Community 版的工程初始化，使用 pnpm + Turborepo 管理 TypeScript 工作区，并保留独立的 Go Connector。完整产品按现有设计逐步实现；Cloud 计划使用独立私有仓库。
+当前处于分阶段开发和验收阶段。第一阶段包含登录、受控工作台描述、SQLite 只读查询和 AI 工作台生成的初步链路；PostgreSQL / MySQL 尚未完成真实数据库验收，数据库写入、文件导入和云端能力尚未实现。原有设计演示仍可从 `/workspaces` 访问，与真实服务分离。
 
-## 当前状态
+本机隔离验收方法、具体操作和已知限制见 [第一阶段验收说明](docs/phase-1-acceptance.md)和 [AI 配置与连接测试](docs/phase-2-ai-connection-acceptance.md)。当前推进数据源结构理解，操作方法与边界见 [数据源结构验收说明](docs/phase-2-datasource-metadata-acceptance.md)。自动化测试使用真实 SQLite 和模拟 AI，不能代表真实模型已经验证；手工操作会使用所选择的模型配置。
 
-- `apps/community-web`：支持管理员、工作区、数据源与语义管理、AI 查询工作台；第七阶段增加本机会话、查询/分析/图表定义、结果表格和图表、执行历史及审计界面。
-- `apps/community-api`：NestJS API 使用 Better Auth 管理本地账号和工作区；数据源与只读查询需显式启用。`GET /api/health` 仅说明进程可响应。
-- `packages/ui`：共享的 Base UI 组件基础；尚未接入全部计划中的 shadcn/ui 和 AI Elements 模式。
-- `connector/go`：独立 Go Connector，支持配对、结构扫描及受本机授权约束的只读查询；不开放数据库写入。
-- `apps/community-api/migrations`：实际数据库结构和迁移来源；旧产品全量模型草稿保留在 `archive/schema-product-draft.prisma`，不是运行时迁移来源。
-- `ui-prototype`：此前的独立静态界面原型，供参考；不作为正式前端运行时。
-
-尚未实现工作区成员管理或 Cloud。受控写入已完成当前范围内的 [G4 技术验收](docs/25-第八阶段G4补齐与验收记录.md)，正式入口仍关闭。MCP 的 G1、G2 已获用户批准；[G3 Server](docs/28-第九阶段G3实施与审核记录.md) 已接入 HTTP/stdio、授权管理与逐次查询审批，当前本机只读组合已获用户审核通过。[G4 Client](docs/29-第九阶段G4实施与审核记录.md) 的实施、隔离测试与当前支持范围见专项记录。MCP 默认关闭，未迁移用户原平台库；完整第九阶段验收尚未完成。AI 模型调用和只读查询的支持范围及已知限制分别见 [第五阶段实施与审核记录](docs/14-第五阶段实施与审核记录.md) 和 [第四阶段实施与审核记录](docs/13-第四阶段实施与审核记录.md)。不要将当前工程直接用于生产。
-
-第七阶段的启用、保留规则与审核证据见 [第七阶段实施与审核记录](docs/16-第七阶段实施与审核记录.md)。保存内容不构成执行授权；重开定义不会自动执行，参数值必须重新填写。
-
-第八阶段的 [受控写入设计](docs/17-第八阶段受控写入设计与审核.md) 和 [核验、计时与恢复修订](docs/20-第八阶段核验计时与恢复修订.md) 已获用户通过作为 G3 基线。当前 [G3 实现与审核记录](docs/21-第八阶段G3实现与审核记录.md) 包含正式组件、AI 草稿、三操作安全执行器、显式迁移、签名协议和恢复；全部数据库验证仅使用另建的独立 13308 实例，原数据库与已有演示库均未连接。正式启动拒绝写入开关，等待 G4 及用户审核。
-
-G1 [独立静态原型](docs/18-第八阶段界面流程与原型说明.md) 继续保留作历史交互参考，不接 API 或数据库；正式工作台不导入该原型。G3 专用组件评审入口连接显式隔离服务，复用正式组件，不能把静态演示状态当作真实执行结果。
-
-架构与代码组织重构、按目标并发协调及运行诊断见 [架构重构与诊断日志记录](docs/22-架构重构与诊断日志实施记录.md)。平台请求编号可关联查询任务及 Connector 两端日志；诊断与持久业务审计分别管理，默认不记录 SQL、参数、结果和凭据。
-
-G4 当前支持范围的技术验收已完成，见 [补齐测试与验收记录](docs/25-第八阶段G4补齐与验收记录.md)：包括真实浏览器确认、断线与进程恢复、权限与并发、审计及加密备份恢复；首轮历史证据保留在 [本机隔离记录](docs/23-第八阶段G4本机隔离验证记录.md)。用户已排除真实断电、实机休眠及物理磁盘故障实测，不提供对应硬件行为保证。当前验证限于 Windows/amd64 和 MySQL 26.7.0；第八阶段待用户阶段审核，正式写入继续关闭。
-
-## 本地开发
-
-要求 Node.js `24.19.0` 或更新的 24.x、pnpm `12.14.0`，Connector 需要 Go 1.24 或更新版本。首次安装：
+正式服务的本地开发启动：
 
 ```bash
-pnpm install
-```
-
-首次启动、管理员初始化和必要的环境配置请见 [Community API 开发说明](apps/community-api/README.md)。API 不会自动读取 .env；请先按说明设置数据库连接和密钥。浏览器访问 `http://127.0.0.1:5173/`。
-
-常用检查：
-
-```bash
-pnpm typecheck
+pnpm install --frozen-lockfile
 pnpm build
-pnpm test
-pnpm format:check
-pnpm lint
-pnpm check:boundaries
-pnpm db:design-validate
+pnpm server:build
+pnpm admin          # 首次创建管理员；忘记密码使用 pnpm admin reset-password
+pnpm server:start
 ```
 
-数据库集成测试需要显式提供专用测试库连接。当前仅在 MySQL 26.7.0 上验证，MySQL 8.0 兼容性还需单独验证。旧版全量 Prisma 模型仅保留为设计参考，不应直接对开发库执行迁移。
+访问 `http://127.0.0.1:3000`。应用数据和独立加密密钥默认保存在 `.shuriva`；可通过 `SHURIVA_DATA_DIR` 指定其他目录，应一同备份并限制访问。服务默认只监听本机，当前阶段不应直接暴露到公网。`pnpm dev` 可启动 Vite，开发时仍需另开终端运行 `pnpm server:dev`。
 
-## 项目资料
+## 服务端职责
 
-- [项目文档目录](docs/README.md)：设计、开发计划及各阶段实施与审核记录。
+- `server/app.ts` 只负责装配认证、数据源、工作台、AI 和静态资源路由；具体业务由各目录中的服务或存储模块处理。
+- `server/auth/` 负责单用户登录、会话及请求来源校验；管理员初始化和密码恢复由 `server/admin.ts` 执行。
+- `server/datasources/` 分别实现 SQLite、PostgreSQL、MySQL 的只读访问；查询编译只接受已校验的描述，并将值参数化。SQLite 访问在独立工作线程中进行。
+- `server/workspaces/` 负责工作台持久化、版本冲突及数据源引用检查。保存工作台与删除数据源时，在 SQLite 写事务中检查关联。
+- `server/ai/` 使用 AI SDK 对应的 DeepSeek、OpenAI、Anthropic 原生 Provider，并保留自定义 OpenAI 兼容 Provider。Claude 使用 Messages 与 JSON Schema 输出，其他提供商使用 Chat Completions；服务端继续独立校验工作台 Schema 和数据源字段，并限制响应大小、超时及自动重试。
+- 应用数据库和加密密钥的读取在 `server/storage.ts`、`server/secrets.ts` 中集中处理；数据库凭证和模型密钥不返回浏览器或写入普通请求日志。
 
-- [第九阶段 MCP 设计与验收计划](docs/26-第九阶段MCP设计与验收计划.md)：SDK 选型、授权与执行边界、Server/Client 界面流程和分步验收。
-- [第九阶段 G2 隔离技术验证](docs/27-第九阶段G2隔离技术验证与审核记录.md)：实际依赖、OAuth 与授权快照、网络/进程及审查记录。
-- [第九阶段 G3 Server 实施与审核](docs/28-第九阶段G3实施与审核记录.md)：管理/审批实测截图、HTTP/stdio、授权与清理边界、安全测试、原生复审和当前支持组合。
-- [第九阶段 G4 Client 实施与审核](docs/29-第九阶段G4实施与审核记录.md)：外部工具连接、逐次确认、网络与受信程序边界、隔离测试及当前支持范围。
+AI 修改工作台时，用户输入、所选数据源结构和工作台配置会发送给所配置的模型服务；已有查询的筛选值会先以临时标记替换，并仅在同一查询、数据源、表和字段下由服务端校验和恢复。数据源结构默认包含读取到的全部表和字段，可在数据源结构页面选择限制范围；服务端按此范围筛选表、字段、业务说明和关系，并拒绝引用范围外字段的当前或生成的查询。用户自行输入到需求或配置中的信息仍会发送。当前不发送数据库记录样本，也不能把这一步等同于完整的字段或行级权限。
 
-- [第八阶段 G4 补齐与验收](docs/25-第八阶段G4补齐与验收记录.md)：剩余矩阵、真实界面、故障与恢复、原生复审及独立环境收尾。
+数据源结构页面展示只读获取的表、字段、数据库注释和已声明关系，并可在 Shuriva 中加密保存业务说明与用户确认的关系，不修改原数据库。说明优先于数据库注释供 AI 理解。`GET /api/datasources/:id/schema` 返回结构、读取警告和当前配置，`PUT /api/datasources/:id/metadata` 按版本保存配置；多源配置相互隔离。关系目前仅提供上下文，查询仍为单表。表或字段读取超出上限时会提示并阻止 AI 生成，避免把不完整的结构当作完整结构。
 
-- [首次全项目评审修复与复验](docs/24-首次全项目评审修复与复验记录.md)：十项问题的修复范围、授权时点、审计事件契约及验证记录。
+工作台系统提示词位于 `server/ai/workspace-prompt.md`，独立连接测试提示词位于 `server/ai/connection-test-prompt.md`，使用中文维护。服务启动时加载这些文件；修改后需重启服务，编译运行时还需重新执行 `pnpm server:build` 复制更新后的提示词。
 
-- [分阶段开发与审核计划](docs/09-分阶段开发与审核计划.md)：每阶段范围、验收标准与审核记录。
-- [第一阶段实施与审核记录](docs/10-第一阶段实施与审核记录.md)：演示步骤、测试、评审和当前限制。
-- [第四阶段实施与审核记录](docs/13-第四阶段实施与审核记录.md)：只读查询、隔离测试及安全限制。
-- [开发约定](AGENTS.md) 和 [Claude Code 入口](CLAUDE.md)。
-- [仓库架构与模块依赖](docs/01-仓库架构与模块依赖.md)、[架构边界与技术验证](docs/06-架构边界与技术验证计划.md)。
-- [数据库设计](docs/02-Community数据库设计.md)、[SQL 安全执行设计](docs/03-SQL安全执行引擎设计.md)。
-- [项目计划](docs/04-开发约定与项目计划.md)、[功能与交互清单](docs/05-产品功能与交互清单.md)、[界面规划](docs/07-界面与交互规划.md)、[决策与实施路线](docs/08-项目决策与实施路线.md)。
-- [Connector 开发说明](connector/go/README.md)。`archive/` 为已取代的历史设计。
-- [Better Auth 本地账号适配性验证](research/better-auth-compatibility/README.md)：独立测试与当前模型差异。
+AI 设置采用提供商列表和配置详情，预置 DeepSeek、OpenAI、Claude，并保留自定义 OpenAI 兼容服务。每家连接保存一份地址和密钥，下挂多个模型，每个模型包含显示名称、实际 API ID 和启用状态，并选择一个已启用的默认模型。DeepSeek 只预置 `deepseek-flash`，OpenAI 预置两个模型，Claude 预置三个模型；也可手动添加账号或代理提供的其他模型 ID。
 
-Community 采用 [Apache 2.0](LICENSE)。依赖的许可证与源码归属仍需在正式发布前完成审查。
+编辑或保存另一家不会切换默认提供商；首次保存时自动启用，之后通过「设为当前使用」明确切换。创建页面和 AI 修改面板可临时选择任意已配置且已启用的模型，该选择不改变全局默认项，也不写入工作台业务 Schema。
 
+`GET /api/settings/ai/providers` 返回不含密钥的全部配置与 `activeProvider`；`PUT /api/settings/ai/providers` 保存 `{ provider, baseUrl, apiKey?, models: [{ id, label, enabled }], defaultModel }`；`POST /api/settings/ai/active` 接受 `{ provider }` 切换默认提供商。服务端拒绝重复模型 ID、空列表，以及未启用或不存在的默认模型。
 
+原有 `GET /api/settings/ai` 继续返回默认提供商与模型，`PUT /api/settings/ai` 兼容保存单个模型并设为该提供商默认，保留其他模型；`POST /api/settings/ai/test` 按表单中的 `model` 单独测试，不保存或读取业务数据。同一提供商和服务地址可省略密钥以复用该项已保存值，更换地址需要重新填写，禁止跨提供商借用密钥。
+
+`POST /api/ai/generate` 可额外携带 `aiModel: { provider, modelId }`，服务端从保存的连接中解析密钥，并检查模型已配置且已启用；省略时使用全局默认项。浏览器不能通过该对象注入服务地址、密钥或 SDK 参数，失效选择明确报错，不会静默切换模型。
+
+配置整体加密保存，内部版本为 3，写入使用 SQLite 事务合并，避免其他提供商的配置丢失。旧单配置和版本 2 的多提供商配置仍可读取，未包含 `provider` 时按 `custom` 处理；原模型和密钥保留，新增预置模型默认停用。首次保存或切换时升级结构，无需人工迁移。模型错误返回经过清理的中文说明和稳定的 `code`，不会返回服务商原始错误或密钥。
+
+登录限速目前保存在单个服务进程的内存中，进程重启后会重置，也不会在多个进程之间共享；上线前需要根据实际部署方案补齐保护。本地验收使用的简单账号密码不适用于生产环境。
+
+后端检查可运行 `pnpm typecheck`、`pnpm test` 和 `pnpm server:build`。测试包含真实临时 SQLite 和本地模拟模型服务；PostgreSQL、MySQL 与真实模型仍需在各自环境中验收。
+
+## 原始前端模板说明
+
+This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+
+Currently, two official plugins are available:
+
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+
+---
+
+## Registry 组件安装（Windows 路径修复）
+
+### 背景
+
+`@shadcn/registry@0.2.1` 的 `resolveNestedFilePath()` 只按 `/` 拆分目标目录。
+
+在 Windows 上，目标目录类似 `C:\Projects\shuriva\src\components`，按 `/` split 后无法匹配目录段，函数会退化为只取文件 basename，导致嵌套 registry 文件被拍平：
+
+```text
+components/assistant-ui/elements/thread.aui.tsx
+-> src/components/thread.aui.tsx        （错误）
+```
+
+正确结果应为：
+
+```text
+src/components/assistant-ui/elements/thread.aui.tsx
+```
+
+本项目通过 pnpm patch 修复了该问题：
+
+- 补丁文件：`patches/@shadcn__registry@0.2.1.patch`
+- 配置位置：`pnpm-workspace.yaml` 的 `patchedDependencies`
+- 锁文件：`pnpm-lock.yaml` 中记录了 patch hash
+
+执行 `pnpm install` 会自动应用补丁。补丁只对**本地安装的 `shadcn` CLI** 生效。
+
+### 安装 assistant-ui 组件
+
+assistant-ui 自己的 CLI 会通过 dlx 下载 `shadcn@latest`，不会使用本项目的补丁，因此优先使用项目脚本：
+
+```bash
+# 安装组件及其依赖
+node scripts/install-registry.mjs thread
+
+# 直接指定 registry URL
+node scripts/install-registry.mjs https://r.assistant-ui.com/base/thread.json
+
+# 只查看文件将落到哪里，不安装、不修改文件
+node scripts/install-registry.mjs thread --dry-run
+```
+
+脚本会：
+
+1. 调用本地 `shadcn add`，保留 Base UI 转换、依赖安装和 registry 解析；
+2. 按 registry 中声明的 `files[].path` 把文件归位；
+3. 修正 shadcn 改写过的、指向拍平位置的 import。
+
+也可以直接使用本地（已打补丁的）CLI：
+
+```bash
+pnpm exec shadcn add https://r.assistant-ui.com/base/thread.json
+```
+
+常用参数：
+
+| 参数              | 作用                                |
+| ----------------- | ----------------------------------- |
+| `--dry-run`       | 只打印安装计划，不执行              |
+| `--skip-cli`      | 不运行 shadcn，只归位已经写出的文件 |
+| `--overwrite`     | 传递 `--overwrite` 给 shadcn CLI    |
+| `--keep-existing` | 目标文件已存在时保留原文件          |
+| `--root <dir>`    | 指定项目根目录                      |
+
+### 升级 `@shadcn/registry` 后
+
+补丁绑定 `@shadcn/registry@0.2.1`。如果依赖升级，需要重新生成补丁：
+
+```bash
+pnpm patch @shadcn/registry@<version>
+```
+
+然后编辑输出目录中的 `dist/chunk-*.js`。实现是压缩过的，搜索 `o.slice(l+1).join("/")` 即可找到 `resolveNestedFilePath` 对应函数，确保在拆分目标目录之前把反斜杠归一化：
+
+```js
+n = r.replace(/\\/g, "/").replace(/^\/|\/$/g, "");
+```
+
+最后提交补丁：
+
+```bash
+pnpm patch-commit <patch-dir>
+```
+
+升级后至少验证一次：
+
+```bash
+node scripts/install-registry.mjs thread --dry-run
+```
+
+### 不要删除
+
+- `patches/@shadcn__registry@0.2.1.patch`
+- `scripts/install-registry.mjs`
+- `pnpm-workspace.yaml` 中的 `patchedDependencies`
+
+否则 Windows 上安装嵌套的 assistant-ui registry 组件时，文件会再次被写入错误目录。
+
+## React Compiler
+
+The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+
+Note: This will impact Vite dev & build performances.
+You can also try [the experimental native React Compiler support in plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md#rust-react-compiler) by using `compiler: true` in the plugin options instead of using the Babel plugin.
+
+## Expanding the Oxlint configuration
+
+If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+
+```json
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+  "options": {
+    "typeAware": true
+  },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  }
+}
+```
+
+See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
