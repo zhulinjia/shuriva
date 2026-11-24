@@ -16,7 +16,17 @@ function initialWidth() {
 }
 
 /** Shared full-height workspace and AI panel; width is a device preference. */
-export function WorkspaceSplitView({ children, sidebar, footer = <AppFooter /> }: { children: ReactNode; sidebar: ReactNode; footer?: ReactNode }) {
+export function WorkspaceSplitView({
+  children,
+  sidebar,
+  footer = <AppFooter />,
+  sidebarCollapsed = false,
+}: {
+  children: ReactNode
+  sidebar: ReactNode
+  footer?: ReactNode
+  sidebarCollapsed?: boolean
+}) {
   const [preferredWidth, setPreferredWidth] = useState(initialWidth)
   const [containerWidth, setContainerWidth] = useState(1200)
   const [availableHeight, setAvailableHeight] = useState<number | null>(null)
@@ -71,7 +81,7 @@ export function WorkspaceSplitView({ children, sidebar, footer = <AppFooter /> }
         {children}
         {footer}
       </div>
-      <div role="separator" aria-label="调整 AI 侧栏宽度" aria-orientation="vertical" aria-valuemin={MIN_WIDTH} aria-valuemax={maxWidth} aria-valuenow={width} tabIndex={0}
+      <div role="separator" hidden={sidebarCollapsed} aria-label="调整 AI 侧栏宽度" aria-orientation="vertical" aria-valuemin={MIN_WIDTH} aria-valuemax={maxWidth} aria-valuenow={width} tabIndex={0}
         className="workspace-split-separator" onPointerDown={start} onPointerMove={move} onPointerUp={stop} onPointerCancel={stop}
         onKeyDown={(event) => {
           if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
@@ -79,7 +89,7 @@ export function WorkspaceSplitView({ children, sidebar, footer = <AppFooter /> }
           changeWidth(width + (event.key === "ArrowLeft" ? 16 : -16))
           rememberWidth()
         }}><span /></div>
-      <aside id="workspace-ai-panel" aria-label="AI 工作台助手" className="workspace-split-sidebar">{sidebar}</aside>
+      <aside id="workspace-ai-panel" hidden={sidebarCollapsed} aria-label="AI 工作台助手" className="workspace-split-sidebar">{sidebar}</aside>
     </div>
   )
 }

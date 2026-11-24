@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, Check, Loader2, RotateCcw } from "lucide-react"
+import { ArrowLeft, Check, Loader2, PanelRightClose, PanelRightOpen, RotateCcw } from "lucide-react"
 import { ConfirmDialog } from "@/components/common/confirm-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -124,6 +124,7 @@ function WorkspaceEditor({
         initial ? [...new Set(initial.document.queries.map((query) => query.datasourceId))] : (initialSourceIds ?? []),
     )
     const [instruction, setInstruction] = useState("")
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
     const [pickerOpen, setPickerOpen] = useState(false)
     const [discardOpen, setDiscardOpen] = useState(false)
     const [messages, setMessages] = useState<AiMessage[]>([
@@ -206,7 +207,7 @@ function WorkspaceEditor({
 
     return (
         <>
-            <WorkspaceSplitView sidebar={sidebar} footer={null}>
+            <WorkspaceSplitView sidebar={sidebar} sidebarCollapsed={sidebarCollapsed} footer={null}>
                 <div className="mx-auto w-full max-w-(--spacing-page) px-6 pt-5 pb-8 max-[700px]:px-4">
                     <div className="sticky top-0 z-10 -mx-2 flex flex-wrap items-center gap-2 border-b border-border bg-background px-2 py-3">
                         <Button type="button" variant="ghost" size="icon-sm" aria-label="返回工作台列表" onClick={onBack}>
@@ -221,6 +222,17 @@ function WorkspaceEditor({
                             )}
                             <span className="text-caption text-muted-foreground">{selectedSources.length} 个数据源</span>
                         </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            aria-controls="workspace-ai-panel"
+                            aria-expanded={!sidebarCollapsed}
+                            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+                        >
+                            {sidebarCollapsed ? <PanelRightOpen aria-hidden="true" /> : <PanelRightClose aria-hidden="true" />}
+                            {sidebarCollapsed ? "展开 AI" : "收起 AI"}
+                        </Button>
                         {dirty && (
                             <>
                                 <Button

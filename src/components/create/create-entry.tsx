@@ -2,9 +2,7 @@ import {
   ArrowRight,
   ChartColumn,
   Database,
-  LayoutGrid,
   Lock,
-  Sparkles,
   Table2,
   TriangleAlert,
   Users,
@@ -90,45 +88,21 @@ export function CreateEntry({
 
   return (
     <div className="mx-auto w-full max-w-(--spacing-page) px-6 pt-6 pb-10 max-[980px]:px-5 max-[700px]:px-4">
-      <section className="grid grid-cols-[minmax(0,1fr)] items-center gap-6 border-b border-border pb-8 min-[981px]:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="min-w-0">
-          <p className="text-caption font-medium tracking-[0.12em] text-muted-foreground uppercase">
-            AI BUSINESS WORKSPACE
-          </p>
-          <h1 className="mt-2 max-w-2xl text-display font-semibold text-foreground">
-            让数据变成
-            <br />
-            <span className="text-muted-foreground">
-              你真正需要的工作台。
-            </span>
-          </h1>
-          <p className="mt-3 max-w-xl text-body leading-relaxed text-muted-foreground">
-            告诉 Shuriva 你想完成什么业务任务。连接现有数据，AI
-            帮你生成可以直接使用和继续调整的工作台。
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-border bg-card p-4 shadow-raised">
-          <p className="text-label font-medium text-foreground">
-            从数据到业务工具
-          </p>
-          <div className="mt-3 flex items-center gap-2">
-            <FlowNode icon={Database} title="数据源" caption="Database" />
-            <ArrowRight
-              className="size-3.5 shrink-0 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <FlowNode icon={Sparkles} title="AI 理解" caption="Structure" />
-            <ArrowRight
-              className="size-3.5 shrink-0 text-muted-foreground"
-              aria-hidden="true"
-            />
-            <FlowNode icon={LayoutGrid} title="工作台" caption="Workspace" />
-          </div>
-          <p className="mt-3 border-t border-border pt-2.5 text-caption leading-relaxed text-muted-foreground">
-            生成的是工作台结构。真实数据只在查询执行后出现，不会预先编造。
-          </p>
-        </div>
+      <section className="border-b border-border pb-8">
+        <p className="text-caption font-medium tracking-[0.12em] text-muted-foreground uppercase">
+          AI BUSINESS WORKSPACE
+        </p>
+        <h1 className="mt-2 max-w-2xl text-display font-semibold text-foreground">
+          让数据变成
+          <br />
+          <span className="text-muted-foreground">
+            你真正需要的工作台。
+          </span>
+        </h1>
+        <p className="mt-3 max-w-xl text-body leading-relaxed text-muted-foreground">
+          告诉 Shuriva 你想完成什么业务任务。连接现有数据，AI
+          帮你生成可以直接使用和继续调整的工作台。
+        </p>
       </section>
 
       <section
@@ -290,28 +264,6 @@ export function CreateEntry({
           })}
         </div>
       </section>
-    </div>
-  )
-}
-
-function FlowNode({
-  icon: Icon,
-  title,
-  caption,
-}: {
-  icon: typeof Database
-  title: string
-  caption: string
-}) {
-  return (
-    <div className="min-w-0 flex-1 rounded-lg border border-border bg-muted/30 p-2.5">
-      <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
-      <strong className="mt-1.5 block truncate text-label font-medium text-foreground">
-        {title}
-      </strong>
-      <small className="block truncate text-caption text-muted-foreground">
-        {caption}
-      </small>
     </div>
   )
 }
